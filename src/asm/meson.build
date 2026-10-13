@@ -3,7 +3,7 @@ toys_asm_lib = static_library(
     sources: files(
         'asm.c',
         'sym.c',
-        'insn.c',
+        'instr.c',
         'data.c',
         'disasm.c',
     ),

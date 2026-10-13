@@ -9,21 +9,20 @@
 
 
 /**
- * Default address space cap in bytes when `WstVmContext.mem_max` is zero.
+ * Default address space cap in bytes.
  * Growth past the resolved cap is fatal, see `WstVmContext`.
  */
 #define WST_VM_MEM_DEFAULT_MAX ((size_t)1024 * 1024 * 1024)
 
 /**
- * Default stack size in bytes when `WstVmContext.stack_size` is zero.
- * Carved after the program image on load, see `WstVmContext`.
+ * Default initial stack size.
+ * Allocated after the program image on load, see `WstVmContext`.
  */
 #define WST_VM_STACK_DEFAULT_SIZE ((size_t)64 * 1024)
 
 /**
  * Integer register holding the stack pointer, RISC-V `sp` convention.
  * `vm.regs[WST_VM_REG_SP]` grows down inside `[stack_base, stack_top]`.
- * Plain `ld`/`st` with `x2` as base give direct stack access with offsets.
  */
 #define WST_VM_REG_SP (2)
 
@@ -94,12 +93,12 @@ typedef enum {
  */
 typedef enum {
     WST_VM_INSTR_FORMAT_INVALID = 0,
-    WST_VM_INSTR_FORMAT_R,               /* opcode, rd, rs1, rs2 */
-    WST_VM_INSTR_FORMAT_I,               /* opcode, rd, rs1, 19-bit signed imm */
-    WST_VM_INSTR_FORMAT_S,               /* opcode, rs1, rs2, 19-bit signed imm */
-    WST_VM_INSTR_FORMAT_B,               /* same shape as S, imm is PC-relative */
-    WST_VM_INSTR_FORMAT_U,               /* opcode, rd, 20-bit imm shifted by 12 */
-    WST_VM_INSTR_FORMAT_J,               /* opcode, rd, 22-bit signed PC-relative imm */
+    WST_VM_INSTR_FORMAT_R,  /* opcode, rd, rs1, rs2 */
+    WST_VM_INSTR_FORMAT_I,  /* opcode, rd, rs1, 19-bit signed imm */
+    WST_VM_INSTR_FORMAT_S,  /* opcode, rs1, rs2, 19-bit signed imm */
+    WST_VM_INSTR_FORMAT_B,  /* same shape as S, imm is PC-relative */
+    WST_VM_INSTR_FORMAT_U,  /* opcode, rd, 20-bit imm shifted by 12 */
+    WST_VM_INSTR_FORMAT_J,  /* opcode, rd, 22-bit signed PC-relative imm */
 } WstVmInstrFormat;
 
 /**
@@ -127,11 +126,12 @@ typedef struct WstVmInstr {
     uint8_t rs2;
     /** Immediate value. */
     int64_t imm;
+    /** Instruction address. */
     size_t addr;
 } WstVmInstr;
 
 /**
- * Thread state: registers, program counter, stack pointer.
+ * Per-thread vm state.
  *
  * The stack lives in virtual memory, top to bottom inside the
  * `[stack_base, stack_top]` range owned by `WstVmContext`.
@@ -181,17 +181,15 @@ typedef void (*WstVmSyscallHandler)(WstVm *vm, WstVmContext *ctx, size_t addr);
 
 
 /**
- * One table row describes an opcode for the interpreter, the assembler
- * and the disassembler: text name, binary format, operand slots, behavior.
- *
- * `fregs` marks operand slots holding float registers, using
- * `WstVmOperand` bits (`RD`/`RS1`/`RS2`). Integer slots take `x0`-`x7`,
- * marked slots take `f0`-`f7`.
+ * Unified instruction description and its handler.
  */
 typedef struct {
     const char *mnemonic;
+    /** Instruction encoding format. */
     WstVmInstrFormat format;
+    /** Instruction operands bit mask. */
     unsigned operands;
+    /** Mask of operands that are fp registers instead of GPRs. */
     unsigned fregs;
     WstVmInstrHandler handler;
 } WstVmInstrDesc;

@@ -94,8 +94,8 @@ bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
                  const char *name, size_t lineno);
 void asm_tables_free(AsmCtx *ctx);
 
-/* insn.c */
-bool asm_parse_insn(char *line, size_t lineno, bool allow_sym,
+/* instr.c */
+bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                      uint32_t *word_out, char **sym_out,
                      WstVmInstrFormat *fmt_out);
 bool asm_emit_word(AsmCtx *ctx, uint32_t word, size_t lineno);

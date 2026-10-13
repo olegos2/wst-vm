@@ -50,22 +50,25 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
     }
 }
 
-uint64_t vm_mem_read(WstVmContext *ctx, uint64_t addr, unsigned width)
-{
-    vm_mem_ensure(ctx, addr, width);
+/* Size-specific accessors, sizes are baked in like flux64 `U(sz)` impls.
+ * Direct dereferences: stack slots and data words are aligned in
+ * practice, same tradeoff as the reference emulator. */
+#define VM_DEF_MEM_RW(bits) \
+    uint##bits##_t vm_mem_read##bits(WstVmContext *ctx, uint64_t addr) \
+    { \
+        vm_mem_ensure(ctx, addr, (bits) / 8); \
+        return *(uint##bits##_t *)&ctx->mem.data[(size_t)addr]; \
+    } \
+    \
+    void vm_mem_write##bits(WstVmContext *ctx, uint64_t addr, uint##bits##_t value) \
+    { \
+        vm_mem_ensure(ctx, addr, (bits) / 8); \
+        *(uint##bits##_t *)&ctx->mem.data[(size_t)addr] = value; \
+        VEC_SEAL((WstVecVoid *)&ctx->mem, sizeof(uint8_t)); \
+    }
 
-    uint64_t value = 0;
-    memcpy(&value, &ctx->mem.data[(size_t)addr], width);
-    return value;
-}
-
-void vm_mem_write(WstVmContext *ctx, uint64_t addr, uint64_t value, unsigned width)
-{
-    vm_mem_ensure(ctx, addr, width);
-
-    memcpy(&ctx->mem.data[(size_t)addr], &value, width);
-    VEC_SEAL((WstVecVoid *)&ctx->mem, sizeof(uint8_t));
-}
+VM_DEF_MEM_RW(64)
+VM_DEF_MEM_RW(32)
 
 /* Push 8 bytes to stack, `sp` grows down. */
 void vm_stack_push(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
@@ -82,7 +85,7 @@ void vm_stack_push(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
     }
 
     vm->regs[WST_VM_REG_SP] = sp - 8;
-    vm_mem_write(ctx, sp - 8, value, 8);
+    vm_mem_write64(ctx, sp - 8, value);
 }
 
 /* Pop 8 bytes from stack */
@@ -100,7 +103,7 @@ uint64_t vm_stack_pop(WstVm *vm, WstVmContext *ctx, size_t pc)
     }
 
     vm->regs[WST_VM_REG_SP] = sp + 8;
-    return vm_mem_read(ctx, sp, 8);
+    return vm_mem_read64(ctx, sp);
 }
 
 bool wst_vm_init(WstVm *vm)
@@ -178,8 +181,9 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
         return false;
     }
 
-    uint32_t word = 0;
-    memcpy(&word, &ctx->mem.data[vm->pc], sizeof(word));
+    /* Fetch never grows memory, past-end is a decode error (checked above).
+     * `pc` is 4-aligned here, so this is an aligned dereference. */
+    uint32_t word = *(const uint32_t *)&ctx->mem.data[vm->pc];
 
     WstVmOp op = (WstVmOp)(word & 0x7Fu);
     const WstVmInstrDesc *desc = &wst_vm_op_table[(unsigned)op];

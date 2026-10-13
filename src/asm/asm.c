@@ -94,7 +94,7 @@ static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
     uint32_t word = 0;
     char *sym = NULL;
     WstVmInstrFormat fmt = WST_VM_INSTR_FORMAT_INVALID;
-    if (!asm_parse_insn(line, lineno, true, &word, &sym, &fmt))
+    if (!asm_parse_instr(line, lineno, true, &word, &sym, &fmt))
         return false;
 
     if (!asm_emit_word(ctx, word, lineno)) {
@@ -131,7 +131,7 @@ static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
         return asm_data_entry(ctx, (char *)p, lineno);
     }
 
-    /* `name:` outside .data is a misplaced data entry, not an insn. */
+    /* `name:` outside .data is a misplaced data entry, not an instr. */
     size_t nlen = strspn(p, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_");
     if (p[nlen] == ':') {
         LOG_E("line %zu: data entries belong in section .data", lineno);
@@ -214,7 +214,7 @@ bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out)
     uint32_t word = 0;
     char *sym = NULL;
     WstVmInstrFormat fmt = WST_VM_INSTR_FORMAT_INVALID;
-    bool ok = asm_parse_insn(tmp, lineno, false, &word, &sym, &fmt);
+    bool ok = asm_parse_instr(tmp, lineno, false, &word, &sym, &fmt);
     free(sym);
     if (ok)
         *out = word;

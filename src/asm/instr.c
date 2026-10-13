@@ -169,7 +169,7 @@ static bool asm_split_ops(char *args, char *toks[3], size_t *ntoks_out,
  * stripped of comments. Numeric operands encode inline, a `:name`
  * immediate needs `allow_sym` and comes back in `sym_out`.
  */
-bool asm_parse_insn(char *line, size_t lineno, bool allow_sym,
+bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                      uint32_t *word_out, char **sym_out,
                      WstVmInstrFormat *fmt_out)
 {

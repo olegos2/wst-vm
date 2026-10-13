@@ -7,11 +7,13 @@
 #include <stdint.h>
 
 
-/** Read guest memory address of up to 8 bytes. */
-uint64_t vm_mem_read(WstVmContext *ctx, uint64_t addr, unsigned width);
+/** Read guest memory, one accessor per operand size. */
+uint64_t vm_mem_read64(WstVmContext *ctx, uint64_t addr);
+uint32_t vm_mem_read32(WstVmContext *ctx, uint64_t addr);
 
-/** Write guest memory up to 8 bytes. */
-void vm_mem_write(WstVmContext *ctx, uint64_t addr, uint64_t value, unsigned width);
+/** Write guest memory, one accessor per operand size. */
+void vm_mem_write64(WstVmContext *ctx, uint64_t addr, uint64_t value);
+void vm_mem_write32(WstVmContext *ctx, uint64_t addr, uint32_t value);
 
 /** Push 8 bytes to guest stack. */
 void vm_stack_push(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value);

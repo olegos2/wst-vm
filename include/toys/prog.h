@@ -47,7 +47,7 @@ typedef struct {
  * Load program file segments into memory, zero-filling the rest.
  * Validates the whole file before touching memory.
  * Entry point goes to `entry_out`. `mem_max` caps `vaddr + memsz`,
- * zero means no cap (caller usually passes its resolved limit).
+ * no limit is set when `mem_max` is `0`.
  *
  * @return `true` on success, `false` on failure.
  */
@@ -55,7 +55,7 @@ bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
                    size_t mem_max);
 
 /**
- * Data segment address for `code_len` code bytes: first 8-aligned
+ * Data segment address for `code_len` code bytes, first 8-aligned
  * address past the code. Shared by the assembler and the saver so
  * assembled data addresses match the linked binary layout.
  */
@@ -63,9 +63,10 @@ size_t wst_prog_data_addr(size_t code_len);
 
 /**
  * Write code and data buffers as a program file with one text segment
- * at address zero and one data segment right after the code.
- * `data_len` zero means text segment only. `entry` must point at a
- * 4-byte word inside the code span, zero is the usual entry.
+ * at address `0` and one data segment right after the code.
+ *
+ * @param path filename to write
+ * @param entry address of first instruction in code segment to execute
  *
  * @return `true` on success, `false` on failure.
  */

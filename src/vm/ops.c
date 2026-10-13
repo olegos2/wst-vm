@@ -190,33 +190,32 @@ void vm_exec_inf(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 void vm_exec_ld(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
-    VM_REG_WRITE(vm, ins->rd, vm_mem_read(ctx, addr, 8));
+    VM_REG_WRITE(vm, ins->rd, vm_mem_read64(ctx, addr));
 }
 
 void vm_exec_lw(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
-    uint64_t raw = vm_mem_read(ctx, addr, 4);
-    VM_REG_WRITE(vm, ins->rd, (uint64_t)(int64_t)(int32_t)(uint32_t)raw);
+    uint32_t raw = vm_mem_read32(ctx, addr);
+    VM_REG_WRITE(vm, ins->rd, (uint64_t)(int64_t)(int32_t)raw);
 }
 
 void vm_exec_st(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
-    vm_mem_write(ctx, addr, VM_REG_READ(vm, ins->rs2), 8);
+    vm_mem_write64(ctx, addr, VM_REG_READ(vm, ins->rs2));
 }
 
 void vm_exec_sw(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
-    uint32_t low = (uint32_t)VM_REG_READ(vm, ins->rs2);
-    vm_mem_write(ctx, addr, (uint64_t)low, 4);
+    vm_mem_write32(ctx, addr, (uint32_t)VM_REG_READ(vm, ins->rs2));
 }
 
 void vm_exec_fld(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
-    uint64_t bits = vm_mem_read(ctx, addr, 8);
+    uint64_t bits = vm_mem_read64(ctx, addr);
     memcpy(&vm->fp[ins->rd], &bits, sizeof(bits));
 }
 
@@ -225,7 +224,7 @@ void vm_exec_fst(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
     uint64_t bits = 0;
     memcpy(&bits, &vm->fp[ins->rs2], sizeof(bits));
-    vm_mem_write(ctx, addr, bits, 8);
+    vm_mem_write64(ctx, addr, bits);
 }
 
 void vm_exec_pushqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)

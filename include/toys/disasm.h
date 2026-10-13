@@ -10,7 +10,7 @@
  * Immediates print as signed decimal, output re-assembles.
  * Unknown opcodes are an error, not data.
  *
- * @return `true` on success, `false` on unknown opcode or short buffer.
+ * @return `true` on success, `false` on unknown opcode or not enough space.
  */
 bool wst_vm_disasm_one(uint32_t word, char *buf, size_t cap);
 
