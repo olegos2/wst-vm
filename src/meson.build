@@ -8,6 +8,8 @@ toys_vm_lib = static_library(
     sources: files(
         'vm/vm.c',
         'vm/prog.c',
+        'vm/asm.c',
+        'vm/disasm.c',
     ),
     include_directories: [
         inc,

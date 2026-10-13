@@ -1,1 +1,2 @@
 subdir('vm')
+subdir('asm')

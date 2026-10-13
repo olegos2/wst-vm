@@ -54,4 +54,22 @@ typedef struct {
 bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
                    size_t mem_max);
 
+/**
+ * Data segment address for `code_len` code bytes: first 8-aligned
+ * address past the code. Shared by the assembler and the saver so
+ * assembled data addresses match the linked binary layout.
+ */
+size_t wst_prog_data_addr(size_t code_len);
+
+/**
+ * Write code and data buffers as a program file with one text segment
+ * at address zero and one data segment right after the code.
+ * `data_len` zero means text segment only. `entry` must point at a
+ * 4-byte word inside the code span, zero is the usual entry.
+ *
+ * @return `true` on success, `false` on failure.
+ */
+bool wst_prog_save(const char *path, const uint8_t *code, size_t code_len,
+                   const uint8_t *data, size_t data_len, size_t entry);
+
 #endif /* TOYS_PROG_H */

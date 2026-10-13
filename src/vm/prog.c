@@ -4,7 +4,9 @@
 #include "toys/vec_internal.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 
@@ -201,5 +203,84 @@ bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
 
     LOG_I("loaded '%s': %zu bytes at entry %zu", path, total_segs, *entry_out);
     wst_file_close(&file);
+    return true;
+}
+
+/* Code goes at zero, data follows 8-aligned, matching the assembler. */
+#define PROG_DATA_ALIGN (8)
+
+size_t wst_prog_data_addr(size_t code_len)
+{
+    return (code_len + PROG_DATA_ALIGN - 1) & ~(size_t)(PROG_DATA_ALIGN - 1);
+}
+
+bool wst_prog_save(const char *path, const uint8_t *code, size_t code_len,
+                   const uint8_t *data, size_t data_len, size_t entry)
+{
+    assert(path != NULL);
+    assert(code_len == 0 || code != NULL);
+    assert(data_len == 0 || data != NULL);
+
+    if (code_len % 4 != 0) {
+        LOG_E("code of %zu bytes is not a whole word count", code_len);
+        return false;
+    }
+    if (entry % 4 != 0 || (code_len > 0 && entry >= code_len)) {
+        LOG_E("bad entry point %zu", entry);
+        return false;
+    }
+
+    size_t data_addr = wst_prog_data_addr(code_len);
+    if (data_len > 0 && data_addr > SIZE_MAX - data_len) {
+        LOG_E("data segment overflows size_t");
+        return false;
+    }
+
+    uint64_t phnum = data_len > 0 ? 2 : 1;
+    uint64_t phoff = sizeof(WstProgHeader);
+    uint64_t code_off = phoff + phnum * sizeof(WstProgSegment);
+    uint64_t data_off = code_off + code_len;
+
+    WstProgHeader hdr = { 0 };
+    memcpy(hdr.magic, WST_PROG_MAGIC, sizeof(hdr.magic));
+    hdr.version = WST_PROG_VERSION;
+    hdr.entry = (uint64_t)entry;
+    hdr.phoff = phoff;
+    hdr.phnum = phnum;
+
+    WstProgSegment text = {
+        .offset = code_off,
+        .vaddr = 0,
+        .filesz = (uint64_t)code_len,
+        .memsz = (uint64_t)code_len,
+    };
+    WstProgSegment blob = {
+        .offset = data_off,
+        .vaddr = (uint64_t)data_addr,
+        .filesz = (uint64_t)data_len,
+        .memsz = (uint64_t)data_len,
+    };
+
+    FILE *out = fopen(path, "wb");
+    if (out == NULL) {
+        LOG_E("cannot open '%s' for writing: %s", path, strerror(errno));
+        return false;
+    }
+
+    bool ok = fwrite(&hdr, sizeof(hdr), 1, out) == 1 &&
+              fwrite(&text, sizeof(text), 1, out) == 1 &&
+              (data_len == 0 || fwrite(&blob, sizeof(blob), 1, out) == 1) &&
+              (code_len == 0 || fwrite(code, 1, code_len, out) == code_len) &&
+              (data_len == 0 || fwrite(data, 1, data_len, out) == data_len);
+
+    if (fclose(out) != 0)
+        ok = false;
+
+    if (!ok) {
+        LOG_E("failed writing '%s': %s", path, strerror(errno));
+        return false;
+    }
+
+    LOG_I("wrote '%s': %zu code and %zu data bytes", path, code_len, data_len);
     return true;
 }

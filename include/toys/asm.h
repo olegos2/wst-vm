@@ -8,6 +8,21 @@
 #include <stdint.h>
 
 /**
+ * Assembled program before linking: code bytes plus a data blob.
+ * Data addresses are `wst_prog_data_addr(code.length) + offset`.
+ * `wst_prog_save` links the two into a program file.
+ */
+typedef struct {
+    WstVecU8 code;
+    WstVecU8 data;
+} WstAsmObject;
+
+/**
+ * Free both buffers. Safe on zero state.
+ */
+void wst_vm_asm_object_free(WstAsmObject *obj);
+
+/**
  * Assemble one code line (`mnemonic operands...`) into a 4-byte word.
  * Operands are `x0`-`x7`/`f0`-`f7` registers and decimal or hex numbers.
  * Unknown mnemonics, bad operands and out-of-range immediates are errors.
@@ -20,21 +35,28 @@
 bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out);
 
 /**
- * Assemble whole source text into machine code bytes, appended to `out`.
+ * Assemble whole source text (`src` of `len` bytes) into `out`.
+ * Resets `out`, freeing previous content. Fails with `out` left empty.
+ *
+ * Sections, one per line (default at start is `section .text`):
+ * - `section .text`: code, `:label` definitions and instructions.
+ * - `section .data`: `name: <type> <value>` entries, types are
+ *   `u64`/`u32` (decimal or hex numbers), `f64` (double) and
+ *   `str "..."` (escapes `\n \\ \" \0 \t`, exact bytes, no NUL added).
+ *   `u64`/`f64` entries align to 8, `u32` to 4.
+ *
+ * Line forms in `.text`: empty line, `mnemonic operands...`, `:label`.
  * Blank lines and `#` comments are skipped, `lineno` counts every line.
  *
- * Two passes over `src`:
- * - first pass emits words and records `:label` definitions with their
- *   byte addresses in a label table (linear array of exact strings,
- *   djb2 hashing only if programs grow past hundreds of labels);
- * - second pass patches label operands that were unknown on first pass.
- *
- * Line forms: empty line, `mnemonic operands...`, `:label_name`.
- * A separate `wst_prog_save`-style step turns these bytes plus entry
- * into a program file, it does not belong here.
+ * Two passes: first pass emits words and records labels plus data
+ * names with their offsets (linear table of exact strings, djb2
+ * hashing only if programs grow past hundreds of symbols). Second
+ * pass resolves every `:name` operand: B/J immediates are PC-relative
+ * (`target - ins_addr`), I/S/U immediates are absolute data/label
+ * addresses (`lui` needs a 4096-aligned address).
  *
  * @return `true` on success, `false` on failure.
  */
-bool wst_vm_asm_source(const char *src, size_t len, WstVecU8 *out);
+bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out);
 
 #endif /* TOYS_ASM_H */

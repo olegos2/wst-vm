@@ -4,6 +4,7 @@
 #include "toys/vec_internal.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
@@ -87,6 +88,14 @@ static size_t vm_mem_limit(const WstVmContext *ctx)
     return ctx->mem_max != 0 ? ctx->mem_max : WST_VM_MEM_DEFAULT_MAX;
 }
 
+/* Zero means default, set `stack_size` before load to override. */
+static size_t vm_stack_size(const WstVmContext *ctx)
+{
+    assert(ctx != NULL);
+
+    return ctx->stack_size != 0 ? ctx->stack_size : WST_VM_STACK_DEFAULT_SIZE;
+}
+
 static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 {
     size_t limit = vm_mem_limit(ctx);
@@ -118,27 +127,40 @@ static void vm_mem_write(WstVmContext *ctx, uint64_t addr, uint64_t value, unsig
     VEC_SEAL((WstVecVoid *)&ctx->mem, sizeof(uint8_t));
 }
 
-static void vm_push_u64(WstVm *vm, size_t pc, uint64_t value)
+/* Push one 8-byte slot, `sp` grows down inside `[stack_base, stack_top]`. */
+static void vm_stack_push(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
 {
-    double bits = 0.0;
-    memcpy(&bits, &value, sizeof(bits));
-    WstVecErr err = wst_vec_double_push(&vm->stack, bits);
-    if (err != WST_VEC_NO_ERR) {
-        LOG_E("stack push failed at pc %zu: %s", pc, wst_vec_err_str(err));
+    uint64_t sp = vm->regs[WST_VM_REG_SP];
+
+    if (sp % 8 != 0) {
+        LOG_E("misaligned sp %llu at pc %zu", (unsigned long long)sp, pc);
         exit(EXIT_FAILURE);
     }
+    if (sp < (uint64_t)ctx->stack_base + 8 || sp > (uint64_t)ctx->stack_top) {
+        LOG_E("stack overflow at pc %zu", pc);
+        exit(EXIT_FAILURE);
+    }
+
+    vm->regs[WST_VM_REG_SP] = sp - 8;
+    vm_mem_write(ctx, sp - 8, value, 8);
 }
 
-static uint64_t vm_pop_u64(WstVm *vm, size_t pc)
+/* Pop one 8-byte slot, empty stack is `sp == stack_top`. */
+static uint64_t vm_stack_pop(WstVm *vm, WstVmContext *ctx, size_t pc)
 {
-    double bits = 0.0;
-    if (wst_vec_double_pop(&vm->stack, &bits) != WST_VEC_NO_ERR) {
+    uint64_t sp = vm->regs[WST_VM_REG_SP];
+
+    if (sp % 8 != 0) {
+        LOG_E("misaligned sp %llu at pc %zu", (unsigned long long)sp, pc);
+        exit(EXIT_FAILURE);
+    }
+    if (sp >= (uint64_t)ctx->stack_top || sp < (uint64_t)ctx->stack_base) {
         LOG_E("stack underflow at pc %zu", pc);
         exit(EXIT_FAILURE);
     }
-    uint64_t value = 0;
-    memcpy(&value, &bits, sizeof(value));
-    return value;
+
+    vm->regs[WST_VM_REG_SP] = sp + 8;
+    return vm_mem_read(ctx, sp, 8);
 }
 
 static void vm_divmod(uint64_t dividend, uint64_t divisor, uint64_t *quot, uint64_t *rem)
@@ -174,6 +196,40 @@ static bool vm_fp_eq(double lhs, double rhs)
 
 #pragma GCC diagnostic pop
 
+/* One stdin line for `ini`/`inf`, fatal on EOF or overlong lines. */
+#define VM_STDIN_LINE_CAP (256)
+
+static void vm_stdin_line(char *buf, size_t pc)
+{
+    assert(buf != NULL);
+
+    fflush(stdout);
+    if (fgets(buf, VM_STDIN_LINE_CAP, stdin) == NULL) {
+        LOG_E("stdin eof at pc %zu", pc);
+        exit(EXIT_FAILURE);
+    }
+
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] != '\n' && !feof(stdin)) {
+        LOG_E("stdin line too long at pc %zu", pc);
+        exit(EXIT_FAILURE);
+    }
+}
+
+/* Trailing whitespace after the parsed number is fine, the rest is not. */
+static bool vm_parse_end(const char *start, const char *end)
+{
+    assert(start != NULL);
+    assert(end != NULL);
+
+    if (end == start)
+        return false;
+
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')
+        end++;
+    return *end == '\0';
+}
+
 static void vm_exec_hlt(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     (void)vm;
@@ -191,6 +247,40 @@ static void vm_exec_outf(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     (void)ctx;
     printf("%g\n", vm->fp[ins->rs1]);
+}
+
+static void vm_exec_ini(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+{
+    (void)ctx;
+
+    char buf[VM_STDIN_LINE_CAP] = { 0 };
+    vm_stdin_line(buf, ins->addr);
+
+    char *end = NULL;
+    errno = 0;
+    long long val = strtoll(buf, &end, 0);
+    if (errno != 0 || !vm_parse_end(buf, end)) {
+        LOG_E("bad integer on stdin at pc %zu", ins->addr);
+        exit(EXIT_FAILURE);
+    }
+    VM_REG_WRITE(vm, ins->rd, (uint64_t)val);
+}
+
+static void vm_exec_inf(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+{
+    (void)ctx;
+
+    char buf[VM_STDIN_LINE_CAP] = { 0 };
+    vm_stdin_line(buf, ins->addr);
+
+    char *end = NULL;
+    errno = 0;
+    double val = strtod(buf, &end);
+    if (errno != 0 || !vm_parse_end(buf, end)) {
+        LOG_E("bad double on stdin at pc %zu", ins->addr);
+        exit(EXIT_FAILURE);
+    }
+    vm->fp[ins->rd] = val;
 }
 
 static void vm_exec_ld(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
@@ -236,28 +326,24 @@ static void vm_exec_fst(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 static void vm_exec_pushqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    (void)ctx;
-    vm_push_u64(vm, ins->addr, VM_REG_READ(vm, ins->rs1));
+    vm_stack_push(vm, ctx, ins->addr, VM_REG_READ(vm, ins->rs1));
 }
 
 static void vm_exec_pushqv(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    (void)ctx;
     uint64_t bits = 0;
     memcpy(&bits, &vm->fp[ins->rs1], sizeof(bits));
-    vm_push_u64(vm, ins->addr, bits);
+    vm_stack_push(vm, ctx, ins->addr, bits);
 }
 
 static void vm_exec_popqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    (void)ctx;
-    VM_REG_WRITE(vm, ins->rd, vm_pop_u64(vm, ins->addr));
+    VM_REG_WRITE(vm, ins->rd, vm_stack_pop(vm, ctx, ins->addr));
 }
 
 static void vm_exec_popqv(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    (void)ctx;
-    uint64_t bits = vm_pop_u64(vm, ins->addr);
+    uint64_t bits = vm_stack_pop(vm, ctx, ins->addr);
     memcpy(&vm->fp[ins->rd], &bits, sizeof(bits));
 }
 
@@ -387,15 +473,13 @@ static void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 static void vm_exec_call(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    (void)ctx;
-    vm_push_u64(vm, ins->addr, (uint64_t)(ins->addr + 4));
+    vm_stack_push(vm, ctx, ins->addr, (uint64_t)(ins->addr + 4));
     vm->pc = (size_t)((int64_t)ins->addr + ins->imm);
 }
 
 static void vm_exec_ret(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    (void)ctx;
-    uint64_t target = vm_pop_u64(vm, ins->addr);
+    uint64_t target = vm_stack_pop(vm, ctx, ins->addr);
     if (target % 4 != 0) {
         LOG_E("misaligned ret target %llu", (unsigned long long)target);
         exit(EXIT_FAILURE);
@@ -404,49 +488,51 @@ static void vm_exec_ret(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 }
 
 const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT] = {
-    [WST_VM_HLT]      = { "hlt",      WST_VM_INSTR_FORMAT_I, WST_VM_OPND_IMM, vm_exec_hlt },
-    [WST_VM_OUTI]     = { "outi",     WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, vm_exec_outi },
-    [WST_VM_OUTF]     = { "outf",     WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, vm_exec_outf },
-    [WST_VM_LD]       = { "ld",       WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, vm_exec_ld },
-    [WST_VM_LW]       = { "lw",       WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, vm_exec_lw },
-    [WST_VM_ST]       = { "st",       WST_VM_INSTR_FORMAT_S, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_st },
-    [WST_VM_SW]       = { "sw",       WST_VM_INSTR_FORMAT_S, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_sw },
-    [WST_VM_FLD]      = { "fld",      WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, vm_exec_fld },
-    [WST_VM_FST]      = { "fst",      WST_VM_INSTR_FORMAT_S, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_fst },
-    [WST_VM_PUSHQR]   = { "pushqr",   WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, vm_exec_pushqr },
-    [WST_VM_PUSHQV]   = { "pushqv",   WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, vm_exec_pushqv },
-    [WST_VM_POPQR]    = { "popqr",    WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD,  vm_exec_popqr },
-    [WST_VM_POPQV]    = { "popqv",    WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD,  vm_exec_popqv },
-    [WST_VM_JAL]      = { "jal",      WST_VM_INSTR_FORMAT_J, WST_VM_OPND_RD  | WST_VM_OPND_IMM, vm_exec_jal },
-    [WST_VM_BEQ]      = { "beq",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_beq },
-    [WST_VM_BNE]      = { "bne",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_bne },
-    [WST_VM_BLT]      = { "blt",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_blt },
-    [WST_VM_BGE]      = { "bge",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, vm_exec_bge },
-    [WST_VM_ADD]      = { "add",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_add },
-    [WST_VM_SUB]      = { "sub",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_sub },
-    [WST_VM_MUL]      = { "mul",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_mul },
-    [WST_VM_DIV]      = { "div",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_div },
-    [WST_VM_MOD]      = { "mod",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_mod },
-    [WST_VM_AND]      = { "and",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_and },
-    [WST_VM_OR]       = { "or",       WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_or },
-    [WST_VM_XOR]      = { "xor",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_xor },
-    [WST_VM_SLL]      = { "sll",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_sll },
-    [WST_VM_SRL]      = { "srl",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_srl },
-    [WST_VM_SRA]      = { "sra",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_sra },
-    [WST_VM_ADDI]     = { "addi",     WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, vm_exec_addi },
-    [WST_VM_LUI]      = { "lui",      WST_VM_INSTR_FORMAT_U, WST_VM_OPND_RD  | WST_VM_OPND_IMM, vm_exec_lui },
-    [WST_VM_FADD]     = { "fadd",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fadd },
-    [WST_VM_FSUB]     = { "fsub",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fsub },
-    [WST_VM_FMUL]     = { "fmul",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fmul },
-    [WST_VM_FDIV]     = { "fdiv",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fdiv },
-    [WST_VM_FSQRT]    = { "fsqrt",    WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1, vm_exec_fsqrt },
-    [WST_VM_FPOW]     = { "fpow",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fpow },
-    [WST_VM_FEQ]      = { "feq",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_feq },
-    [WST_VM_FLT]      = { "flt",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_flt },
-    [WST_VM_FLE]      = { "fle",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fle },
-    [WST_VM_ECALL]    = { "ecall",    WST_VM_INSTR_FORMAT_I, WST_VM_OPND_IMM, vm_exec_ecall },
-    [WST_VM_CALL]     = { "call",     WST_VM_INSTR_FORMAT_J, WST_VM_OPND_IMM, vm_exec_call },
-    [WST_VM_RET]      = { "ret",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_NONE, vm_exec_ret },
+    [WST_VM_HLT]      = { "hlt",      WST_VM_INSTR_FORMAT_I, WST_VM_OPND_IMM, 0, vm_exec_hlt },
+    [WST_VM_OUTI]     = { "outi",     WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, 0, vm_exec_outi },
+    [WST_VM_OUTF]     = { "outf",     WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, WST_VM_OPND_RS1, vm_exec_outf },
+    [WST_VM_LD]       = { "ld",       WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, 0, vm_exec_ld },
+    [WST_VM_LW]       = { "lw",       WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, 0, vm_exec_lw },
+    [WST_VM_ST]       = { "st",       WST_VM_INSTR_FORMAT_S, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, 0, vm_exec_st },
+    [WST_VM_SW]       = { "sw",       WST_VM_INSTR_FORMAT_S, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, 0, vm_exec_sw },
+    [WST_VM_FLD]      = { "fld",      WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, WST_VM_OPND_RD, vm_exec_fld },
+    [WST_VM_FST]      = { "fst",      WST_VM_INSTR_FORMAT_S, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, WST_VM_OPND_RS2, vm_exec_fst },
+    [WST_VM_PUSHQR]   = { "pushqr",   WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, 0, vm_exec_pushqr },
+    [WST_VM_PUSHQV]   = { "pushqv",   WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RS1, WST_VM_OPND_RS1, vm_exec_pushqv },
+    [WST_VM_POPQR]    = { "popqr",    WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD, 0, vm_exec_popqr },
+    [WST_VM_POPQV]    = { "popqv",    WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD, WST_VM_OPND_RD, vm_exec_popqv },
+    [WST_VM_JAL]      = { "jal",      WST_VM_INSTR_FORMAT_J, WST_VM_OPND_RD  | WST_VM_OPND_IMM, 0, vm_exec_jal },
+    [WST_VM_BEQ]      = { "beq",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, 0, vm_exec_beq },
+    [WST_VM_BNE]      = { "bne",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, 0, vm_exec_bne },
+    [WST_VM_BLT]      = { "blt",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, 0, vm_exec_blt },
+    [WST_VM_BGE]      = { "bge",      WST_VM_INSTR_FORMAT_B, WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM, 0, vm_exec_bge },
+    [WST_VM_ADD]      = { "add",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_add },
+    [WST_VM_SUB]      = { "sub",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_sub },
+    [WST_VM_MUL]      = { "mul",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_mul },
+    [WST_VM_DIV]      = { "div",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_div },
+    [WST_VM_MOD]      = { "mod",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_mod },
+    [WST_VM_AND]      = { "and",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_and },
+    [WST_VM_OR]       = { "or",       WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_or },
+    [WST_VM_XOR]      = { "xor",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_xor },
+    [WST_VM_SLL]      = { "sll",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_sll },
+    [WST_VM_SRL]      = { "srl",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_srl },
+    [WST_VM_SRA]      = { "sra",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, 0, vm_exec_sra },
+    [WST_VM_ADDI]     = { "addi",     WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM, 0, vm_exec_addi },
+    [WST_VM_LUI]      = { "lui",      WST_VM_INSTR_FORMAT_U, WST_VM_OPND_RD  | WST_VM_OPND_IMM, 0, vm_exec_lui },
+    [WST_VM_FADD]     = { "fadd",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RD | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fadd },
+    [WST_VM_FSUB]     = { "fsub",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RD | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fsub },
+    [WST_VM_FMUL]     = { "fmul",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RD | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fmul },
+    [WST_VM_FDIV]     = { "fdiv",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RD | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fdiv },
+    [WST_VM_FSQRT]    = { "fsqrt",    WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1, WST_VM_OPND_RD | WST_VM_OPND_RS1, vm_exec_fsqrt },
+    [WST_VM_FPOW]     = { "fpow",     WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RD | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fpow },
+    [WST_VM_FEQ]      = { "feq",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_feq },
+    [WST_VM_FLT]      = { "flt",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_flt },
+    [WST_VM_FLE]      = { "fle",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fle },
+    [WST_VM_ECALL]    = { "ecall",    WST_VM_INSTR_FORMAT_I, WST_VM_OPND_IMM, 0, vm_exec_ecall },
+    [WST_VM_CALL]     = { "call",     WST_VM_INSTR_FORMAT_J, WST_VM_OPND_IMM, 0, vm_exec_call },
+    [WST_VM_RET]      = { "ret",      WST_VM_INSTR_FORMAT_R, WST_VM_OPND_NONE, 0, vm_exec_ret },
+    [WST_VM_INI]      = { "ini",      WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD, 0, vm_exec_ini },
+    [WST_VM_INF]      = { "inf",      WST_VM_INSTR_FORMAT_I, WST_VM_OPND_RD, WST_VM_OPND_RD, vm_exec_inf },
 };
 
 bool wst_vm_init(WstVm *vm)
@@ -458,12 +544,6 @@ bool wst_vm_init(WstVm *vm)
         vm->fp[i] = 0.0;
     }
     vm->pc = 0;
-
-    WstVecErr err = wst_vec_double_init(&vm->stack, 0);
-    if (err != WST_VEC_NO_ERR) {
-        LOG_E("cannot init value stack: %s", wst_vec_err_str(err));
-        return false;
-    }
     return true;
 }
 
@@ -474,12 +554,29 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
 
     wst_vec_u8_free(&ctx->mem);
     ctx->entry = 0;
+    ctx->stack_base = 0;
+    ctx->stack_top = 0;
 
     size_t entry = 0;
     if (!wst_prog_load(&ctx->mem, &entry, path, vm_mem_limit(ctx)))
         return false;
 
+    if (ctx->mem.length > SIZE_MAX - 8)
+        return false;
+
+    size_t base = (ctx->mem.length + 7) & ~(size_t)7;
+    size_t ssize = vm_stack_size(ctx);
+    size_t limit = vm_mem_limit(ctx);
+    if (ssize > limit || base > limit - ssize) {
+        LOG_E("stack of %zu bytes past address space end", ssize);
+        return false;
+    }
+    if (wst_vec_u8_resize(&ctx->mem, base + ssize) != WST_VEC_NO_ERR)
+        return false;
+
     ctx->entry = entry;
+    ctx->stack_base = base;
+    ctx->stack_top = base + ssize;
     return true;
 }
 
@@ -493,6 +590,8 @@ void wst_vm_context_free(WstVmContext *ctx)
         LOG_W("address space damaged: %s", wst_vec_err_str(err));
 
     ctx->entry = 0;
+    ctx->stack_base = 0;
+    ctx->stack_top = 0;
 }
 
 bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
@@ -585,8 +684,5 @@ void wst_vm_close(WstVm *vm)
     if (vm == NULL)
         return;
 
-    WstVecErr err = wst_vec_double_free(&vm->stack);
-    if (err != WST_VEC_NO_ERR)
-        LOG_W("value stack damaged: %s", wst_vec_err_str(err));
     vm->pc = 0;
 }

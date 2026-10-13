@@ -14,6 +14,19 @@
  */
 #define WST_VM_MEM_DEFAULT_MAX ((size_t)1024 * 1024 * 1024)
 
+/**
+ * Default stack size in bytes when `WstVmContext.stack_size` is zero.
+ * Carved after the program image on load, see `WstVmContext`.
+ */
+#define WST_VM_STACK_DEFAULT_SIZE ((size_t)64 * 1024)
+
+/**
+ * Integer register holding the stack pointer, RISC-V `sp` convention.
+ * `vm.regs[WST_VM_REG_SP]` grows down inside `[stack_base, stack_top]`.
+ * Plain `ld`/`st` with `x2` as base give direct stack access with offsets.
+ */
+#define WST_VM_REG_SP (2)
+
 #define WST_VM_OPCODE_BITS (7)
 #define WST_VM_OPCODE_COUNT (1u << WST_VM_OPCODE_BITS)
 
@@ -62,8 +75,10 @@ typedef enum {
     WST_VM_FLT      = 0x26, /* FP compare less than, 0/1 stored into GPR */
     WST_VM_FLE      = 0x27, /* FP compare less then equal, 0/1 stored into GPR */
     WST_VM_ECALL    = 0x28, /* host call by number in imm */
-    WST_VM_CALL     = 0x29, /* push pc+4 on value stack, jump */
-    WST_VM_RET      = 0x2A, /* pop pc from value stack */
+    WST_VM_CALL     = 0x29, /* push pc+4 on stack, jump */
+    WST_VM_RET      = 0x2A, /* pop pc from stack */
+    WST_VM_INI      = 0x2B, /* read decimal integer from stdin into GPR */
+    WST_VM_INF      = 0x2C, /* read double from stdin into FP register */
 } WstVmOp;
 
 /**
@@ -116,21 +131,19 @@ typedef struct WstVmInstr {
 } WstVmInstr;
 
 /**
- * Thread state that manages registers, program counter and value stack.
+ * Thread state: registers, program counter, stack pointer.
  *
- * Value stack is a protected `WstVecDouble` holding raw 8-byte slots.
- * Long-term plan is to back it by virtual memory: reserve a stack
- * segment at the top of the address space, growing down from `mem_max`
- * with an explicit `sp`, keeping Vec bounds checks as guard logic.
- * Do not add a direction switch to `vec_internal.h` for this: a
- * descending Vec would complicate every vector user for one use case.
- * A dedicated `sp` plus `vm_stack_push/pop` on `ctx->mem` is simpler.
+ * The stack lives in virtual memory, top to bottom inside the
+ * `[stack_base, stack_top]` range owned by `WstVmContext`.
+ * `regs[WST_VM_REG_SP]` points at the first free slot above the top
+ * item (empty stack means `sp == stack_top`). Pushes decrement by 8,
+ * pops increment. Misaligned `sp`, overflow past `stack_base` and
+ * underflow past `stack_top` are fatal.
  */
 typedef struct WstVm {
     uint64_t regs[8];
     double fp[8];
     size_t pc;
-    WstVecDouble stack;
 } WstVm;
 
 /**
@@ -139,11 +152,19 @@ typedef struct WstVm {
  * `mem_max` caps `vaddr + memsz` on load and every load/store/fetch
  * past it is fatal. Zero means `WST_VM_MEM_DEFAULT_MAX`, set it
  * before `wst_vm_context_load` to override (example `vm --mem-max`).
+ *
+ * `stack_size` is carved after the program image on load, zero means
+ * `WST_VM_STACK_DEFAULT_SIZE`. `stack_base`/`stack_top` are outputs:
+ * after load set `vm.regs[WST_VM_REG_SP]` to `stack_top`
+ * (the example runner does this next to `vm.pc = ctx.entry`).
  */
 typedef struct WstVmContext {
     WstVecU8 mem;
     size_t entry;
     size_t mem_max;
+    size_t stack_size;
+    size_t stack_base;
+    size_t stack_top;
 } WstVmContext;
 
 /**
@@ -155,11 +176,16 @@ typedef void (*WstVmHandler)(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins
 /**
  * One table row describes an opcode for the interpreter, the assembler
  * and the disassembler: text name, binary format, operand slots, behavior.
+ *
+ * `fregs` marks operand slots holding float registers, using
+ * `WstVmOperand` bits (`RD`/`RS1`/`RS2`). Integer slots take `x0`-`x7`,
+ * marked slots take `f0`-`f7`.
  */
 typedef struct {
     const char *mnemonic;
     WstVmInstrFormat format;
     unsigned operands;
+    unsigned fregs;
     WstVmHandler handler;
 } WstVmInstrDesc;
 
@@ -169,15 +195,16 @@ typedef struct {
 extern const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT];
 
 /**
- * Zero the state and init the value stack.
+ * Zero the state. Infallible, kept boolean for a stable API.
  *
- * @return `true` on success, `false` otherwise.
+ * @return `true` always.
  */
 bool wst_vm_init(WstVm *vm);
 
 /**
- * Load program file into a fresh address space.
- * Honors `ctx->mem_max`, zero means default.
+ * Load program file into a fresh address space, carving the stack
+ * after the image. Honors `ctx->mem_max`/`ctx->stack_size`,
+ * zero means default.
  *
  * @return `true` on success, `false` otherwise.
  */
@@ -202,7 +229,7 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins);
 void wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
 
 /**
- * Free value stack. Safe on zero state.
+ * Reset program counter. Safe on zero state.
  */
 void wst_vm_close(WstVm *vm);
 
