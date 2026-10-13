@@ -52,23 +52,23 @@ typedef enum {
     WST_VM_BNE      = 0x0F, /* branch if not equal */
     WST_VM_BLT      = 0x10, /* branch if less, signed */
     WST_VM_BGE      = 0x11, /* branch if greater or equal, signed */
-    WST_VM_ADD      = 0x12,
-    WST_VM_SUB      = 0x13,
+    WST_VM_ADD      = 0x12, /* add 2 GPRs, store res in 3rd GPR. */
+    WST_VM_SUB      = 0x13, /* sub 2 GPRs, store res in 3rd GPR. */
     WST_VM_MUL      = 0x14,
     WST_VM_DIV      = 0x15,
     WST_VM_MOD      = 0x16,
-    WST_VM_AND      = 0x17,
-    WST_VM_OR       = 0x18,
-    WST_VM_XOR      = 0x19,
-    WST_VM_SLL      = 0x1A,
-    WST_VM_SRL      = 0x1B,
-    WST_VM_SRA      = 0x1C,
-    WST_VM_ADDI     = 0x1D,
+    WST_VM_AND      = 0x17, /* bitwise AND on registers */
+    WST_VM_OR       = 0x18, /* bitwise OR on registers */
+    WST_VM_XOR      = 0x19, /* bitwise XOR on registers */
+    WST_VM_SLL      = 0x1A, /* shift left unsigned */
+    WST_VM_SRL      = 0x1B, /* shift right unsigned */
+    WST_VM_SRA      = 0x1C, /* shift right signed */
+    WST_VM_ADDI     = 0x1D, /* add register and immediate, store res in 3rd register. */
     WST_VM_LUI      = 0x1E,
-    WST_VM_FADD     = 0x1F,
-    WST_VM_FSUB     = 0x20,
+    WST_VM_FADD     = 0x1F, /* add 2 FP regs, store res in 3rd FP reg. */
+    WST_VM_FSUB     = 0x20, /* sub 2 FP regs, store res in 3rd FP reg. */
     WST_VM_FMUL     = 0x21,
-    WST_VM_FDIV     = 0x22,
+    WST_VM_FDIV     = 0x22, 
     WST_VM_FSQRT    = 0x23,
     WST_VM_FPOW     = 0x24,
     WST_VM_FEQ      = 0x25, /* FP compare equal, 0/1 stored into GPR */
@@ -168,10 +168,17 @@ typedef struct WstVmContext {
 } WstVmContext;
 
 /**
- * Single instruction behavior. Runs with live state, jumps overwrite
- * pc which the dispatcher presets to the next address.
+ * Handler of a single instruction.
+ *
+ * Runs with live state, jumps overwrite pc.
  */
-typedef void (*WstVmHandler)(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
+typedef void (*WstVmInstrHandler)(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
+
+/**
+ * Handler of a single syscall.
+ */
+typedef void (*WstVmSyscallHandler)(WstVm *vm, WstVmContext *ctx, size_t addr);
+
 
 /**
  * One table row describes an opcode for the interpreter, the assembler
@@ -186,7 +193,7 @@ typedef struct {
     WstVmInstrFormat format;
     unsigned operands;
     unsigned fregs;
-    WstVmHandler handler;
+    WstVmInstrHandler handler;
 } WstVmInstrDesc;
 
 /**

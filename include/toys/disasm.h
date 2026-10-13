@@ -8,7 +8,7 @@
 /**
  * Format one instruction word as `mnemonic operands` into `buf`.
  * Immediates print as signed decimal, output re-assembles.
- * Unknown opcodes are an error, not data: use `.word` yourself.
+ * Unknown opcodes are an error, not data.
  *
  * @return `true` on success, `false` on unknown opcode or short buffer.
  */

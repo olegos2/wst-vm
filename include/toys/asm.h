@@ -8,8 +8,8 @@
 #include <stdint.h>
 
 /**
- * Assembled program before linking: code bytes plus a data blob.
- * Data addresses are `wst_prog_data_addr(code.length) + offset`.
+ * Assembled program before linking with code and data blob.
+ * Data addresses are data segment relative in code.
  * `wst_prog_save` links the two into a program file.
  */
 typedef struct {
@@ -18,7 +18,7 @@ typedef struct {
 } WstAsmObject;
 
 /**
- * Free both buffers. Safe on zero state.
+ * Free an assembly object.
  */
 void wst_vm_asm_object_free(WstAsmObject *obj);
 
@@ -41,8 +41,8 @@ bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out);
  * Sections, one per line (default at start is `section .text`):
  * - `section .text`: code, `:label` definitions and instructions.
  * - `section .data`: `name: <type> <value>` entries, types are
- *   `u64`/`u32` (decimal or hex numbers), `f64` (double) and
- *   `str "..."` (escapes `\n \\ \" \0 \t`, exact bytes, no NUL added).
+ *   `u64`/`u32` (dec/hex int), `f64` (double) and
+ *   `str "..."` (no NUL added automatically).
  *   `u64`/`f64` entries align to 8, `u32` to 4.
  *
  * Line forms in `.text`: empty line, `mnemonic operands...`, `:label`.
