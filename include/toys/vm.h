@@ -202,6 +202,13 @@ typedef struct {
 extern const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT];
 
 /**
+ * Operand slots of a format in assembly order (`rd`, `rs1`, `rs2`,
+ * `imm` subset). Writes at most 4 entries to `slots`, count to `n_out`,
+ * zero on unknown formats. Shared by the assembler and disassembler.
+ */
+void wst_vm_format_slots(WstVmInstrFormat fmt, unsigned slots[4], size_t *n_out);
+
+/**
  * Zero the state. Infallible, kept boolean for a stable API.
  *
  * @return `true` always.

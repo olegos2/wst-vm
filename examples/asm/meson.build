@@ -5,7 +5,7 @@ executable(
     ),
     include_directories: inc,
     dependencies: [
-        toys_vm_dep,
+        toys_asm_dep,
     ],
     install: true,
 )

@@ -124,38 +124,11 @@ bool wst_vm_disasm_one(uint32_t word, char *buf, size_t cap)
         return false;
 
     bool first = true;
-    /* Slot print order matches the assembler operand order. */
     unsigned order[4] = { 0, 0, 0, 0 };
     size_t norder = 0;
-    switch (desc->format) {
-    case WST_VM_INSTR_FORMAT_R:
-        order[0] = WST_VM_OPND_RD;
-        order[1] = WST_VM_OPND_RS1;
-        order[2] = WST_VM_OPND_RS2;
-        norder = 3;
-        break;
-    case WST_VM_INSTR_FORMAT_I:
-        order[0] = WST_VM_OPND_RD;
-        order[1] = WST_VM_OPND_RS1;
-        order[2] = WST_VM_OPND_IMM;
-        norder = 3;
-        break;
-    case WST_VM_INSTR_FORMAT_S:
-    case WST_VM_INSTR_FORMAT_B:
-        order[0] = WST_VM_OPND_RS1;
-        order[1] = WST_VM_OPND_RS2;
-        order[2] = WST_VM_OPND_IMM;
-        norder = 3;
-        break;
-    case WST_VM_INSTR_FORMAT_U:
-    case WST_VM_INSTR_FORMAT_J:
-        order[0] = WST_VM_OPND_RD;
-        order[1] = WST_VM_OPND_IMM;
-        norder = 2;
-        break;
-    default:
+    wst_vm_format_slots(desc->format, order, &norder);
+    if (norder == 0)
         return false;
-    }
 
     for (size_t i = 0; i < norder; i++) {
         if ((desc->operands & order[i]) == 0)
