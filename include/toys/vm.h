@@ -1,74 +1,208 @@
 #ifndef TOYS_VM_H
 #define TOYS_VM_H
 
-#include "toys/file.h"
-#include "toys/stk.h"
+#include "toys/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+
+
+/**
+ * Default address space cap in bytes when `WstVmContext.mem_max` is zero.
+ * Growth past the resolved cap is fatal, see `WstVmContext`.
+ */
+#define WST_VM_MEM_DEFAULT_MAX ((size_t)1024 * 1024 * 1024)
+
+#define WST_VM_OPCODE_BITS (7)
+#define WST_VM_OPCODE_COUNT (1u << WST_VM_OPCODE_BITS)
 
 /**
  * Instruction set, enum values match opcode bytes.
  */
 typedef enum {
-    WST_VM_HLT = 0x00,     /* hlt */
-    WST_VM_PUSHQ = 0x01,   /* pushq imm64 */
-    WST_VM_POPQ = 0x02,    /* popq */
-    WST_VM_ADDSD = 0x03,   /* addsd */
-    WST_VM_SUBSD = 0x04,   /* subsd */
-    WST_VM_MULSD = 0x05,   /* mulsd */
-    WST_VM_DIVSD = 0x06,   /* divsd */
-    WST_VM_POWSD = 0x07,   /* powsd */
-    WST_VM_OUTD = 0x08,    /* outd */
+    WST_VM_HLT      = 0x00, /* halt with exit code */
+    WST_VM_OUTI     = 0x01, /* print GPR as decimal */
+    WST_VM_OUTF     = 0x02, /* print FP register as double */
+    WST_VM_LD       = 0x03, /* load 64-bit, sign-extended */
+    WST_VM_LW       = 0x04, /* load 32-bit, sign-extended */
+    WST_VM_ST       = 0x05, /* store 64-bit */
+    WST_VM_SW       = 0x06, /* store low 32 bits */
+    WST_VM_FLD      = 0x07, /* load 64 bits into FP register */
+    WST_VM_FST      = 0x08, /* store FP register as 64 bits */
+    WST_VM_PUSHQR   = 0x09, /* push GPR bits */
+    WST_VM_PUSHQV   = 0x0A, /* push FP register bits */
+    WST_VM_POPQR    = 0x0B, /* pop bits into GPR */
+    WST_VM_POPQV    = 0x0C, /* pop bits into FP register */
+    WST_VM_JAL      = 0x0D, /* jump with link */
+    WST_VM_BEQ      = 0x0E, /* branch if equal */
+    WST_VM_BNE      = 0x0F, /* branch if not equal */
+    WST_VM_BLT      = 0x10, /* branch if less, signed */
+    WST_VM_BGE      = 0x11, /* branch if greater or equal, signed */
+    WST_VM_ADD      = 0x12,
+    WST_VM_SUB      = 0x13,
+    WST_VM_MUL      = 0x14,
+    WST_VM_DIV      = 0x15,
+    WST_VM_MOD      = 0x16,
+    WST_VM_AND      = 0x17,
+    WST_VM_OR       = 0x18,
+    WST_VM_XOR      = 0x19,
+    WST_VM_SLL      = 0x1A,
+    WST_VM_SRL      = 0x1B,
+    WST_VM_SRA      = 0x1C,
+    WST_VM_ADDI     = 0x1D,
+    WST_VM_LUI      = 0x1E,
+    WST_VM_FADD     = 0x1F,
+    WST_VM_FSUB     = 0x20,
+    WST_VM_FMUL     = 0x21,
+    WST_VM_FDIV     = 0x22,
+    WST_VM_FSQRT    = 0x23,
+    WST_VM_FPOW     = 0x24,
+    WST_VM_FEQ      = 0x25, /* FP compare equal, 0/1 stored into GPR */
+    WST_VM_FLT      = 0x26, /* FP compare less than, 0/1 stored into GPR */
+    WST_VM_FLE      = 0x27, /* FP compare less then equal, 0/1 stored into GPR */
+    WST_VM_ECALL    = 0x28, /* host call by number in imm */
+    WST_VM_CALL     = 0x29, /* push pc+4 on value stack, jump */
+    WST_VM_RET      = 0x2A, /* pop pc from value stack */
 } WstVmOp;
 
 /**
- * Decoded instruction.
+ * Host calls for `ecall`, number goes in imm.
  */
-typedef struct {
+typedef enum {
+    WST_VM_SYS_EXIT = 0,    /* exit with code from regs[1] */
+    WST_VM_SYS_WRITE = 1,   /* write regs[3] bytes from regs[2] to fd regs[1] */
+} WstVmSyscall;
+
+/**
+ * Instruction formats, fixed 4-byte words with 7-bit opcode.
+ */
+typedef enum {
+    WST_VM_INSTR_FORMAT_INVALID = 0,
+    WST_VM_INSTR_FORMAT_R,               /* opcode, rd, rs1, rs2 */
+    WST_VM_INSTR_FORMAT_I,               /* opcode, rd, rs1, 19-bit signed imm */
+    WST_VM_INSTR_FORMAT_S,               /* opcode, rs1, rs2, 19-bit signed imm */
+    WST_VM_INSTR_FORMAT_B,               /* same shape as S, imm is PC-relative */
+    WST_VM_INSTR_FORMAT_U,               /* opcode, rd, 20-bit imm shifted by 12 */
+    WST_VM_INSTR_FORMAT_J,               /* opcode, rd, 22-bit signed PC-relative imm */
+} WstVmInstrFormat;
+
+/**
+ * Operand slots an instruction uses, as a bitmask.
+ */
+typedef enum {
+    WST_VM_OPND_NONE = 0,
+    WST_VM_OPND_RD   = 1u << 0,
+    WST_VM_OPND_RS1  = 1u << 1,
+    WST_VM_OPND_RS2  = 1u << 2,
+    WST_VM_OPND_IMM  = 1u << 3,
+} WstVmOperand;
+
+/**
+ * Decoded instruction, immediates already sign-extended.
+ */
+typedef struct WstVmInstr {
+    /** Instruction opcode. */
     WstVmOp op;
-    double imm;
+    /** Destination register index. */
+    uint8_t rd;
+    /** Source 1 register index. */
+    uint8_t rs1;
+    /** Source 2 register index. */
+    uint8_t rs2;
+    /** Immediate value. */
+    int64_t imm;
+    size_t addr;
 } WstVmInstr;
 
 /**
- * Stack machine state, owns program mapping and value stack.
+ * Thread state that manages registers, program counter and value stack.
+ *
+ * Value stack is a protected `WstVecDouble` holding raw 8-byte slots.
+ * Long-term plan is to back it by virtual memory: reserve a stack
+ * segment at the top of the address space, growing down from `mem_max`
+ * with an explicit `sp`, keeping Vec bounds checks as guard logic.
+ * Do not add a direction switch to `vec_internal.h` for this: a
+ * descending Vec would complicate every vector user for one use case.
+ * A dedicated `sp` plus `vm_stack_push/pop` on `ctx->mem` is simpler.
+ */
+typedef struct WstVm {
+    uint64_t regs[8];
+    double fp[8];
+    size_t pc;
+    WstVecDouble stack;
+} WstVm;
+
+/**
+ * Vm context that manages virtual memory and saves entry point.
+ *
+ * `mem_max` caps `vaddr + memsz` on load and every load/store/fetch
+ * past it is fatal. Zero means `WST_VM_MEM_DEFAULT_MAX`, set it
+ * before `wst_vm_context_load` to override (example `vm --mem-max`).
+ */
+typedef struct WstVmContext {
+    WstVecU8 mem;
+    size_t entry;
+    size_t mem_max;
+} WstVmContext;
+
+/**
+ * Single instruction behavior. Runs with live state, jumps overwrite
+ * pc which the dispatcher presets to the next address.
+ */
+typedef void (*WstVmHandler)(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
+
+/**
+ * One table row describes an opcode for the interpreter, the assembler
+ * and the disassembler: text name, binary format, operand slots, behavior.
  */
 typedef struct {
-    WstFile prog;
-    size_t rip;
-    WstStkDouble stack;
-} WstVm;
+    const char *mnemonic;
+    WstVmInstrFormat format;
+    unsigned operands;
+    WstVmHandler handler;
+} WstVmInstrDesc;
+
+/**
+ * Opcode table, indexed by opcode byte. Empty rows are invalid opcodes.
+ */
+extern const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT];
 
 /**
  * Zero the state and init the value stack.
  *
- * @return `true` on success, `false` otherwise
+ * @return `true` on success, `false` otherwise.
  */
 bool wst_vm_init(WstVm *vm);
 
 /**
- * Load program file into memory, set rip to first instruction.
- * Unloads previous program, if any.
+ * Load program file into a fresh address space.
+ * Honors `ctx->mem_max`, zero means default.
  *
  * @return `true` on success, `false` otherwise.
  */
-bool wst_vm_open(WstVm *vm, const char *path);
+bool wst_vm_context_load(WstVmContext *ctx, const char *path);
 
 /**
- * Decode instruction at rip, advance rip past it.
+ * Free the address space. Safe on zero state.
+ */
+void wst_vm_context_free(WstVmContext *ctx);
+
+/**
+ * Decode instruction at pc without moving it.
  *
  * @return `true` when instruction was decoded, `false` on error.
  */
-bool wst_vm_decode(WstVm *vm, WstVmInstr *instr);
+bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins);
 
 /**
- * Execute one decoded instruction.
- * Stack errors are fatal, hlt exits the process.
+ * Execute one decoded instruction, moving pc past it.
+ * Stack errors, bad memory and `hlt` are fatal.
  */
-void wst_vm_execute(WstVm *vm, const WstVmInstr *instr);
+void wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
 
 /**
- * Free value stack and unload program. Safe on zero state.
+ * Free value stack. Safe on zero state.
  */
 void wst_vm_close(WstVm *vm);
 

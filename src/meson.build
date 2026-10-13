@@ -1,4 +1,3 @@
-
 toys_vm_deps = [
     m_dep,
     toys_common_dep,
@@ -7,7 +6,8 @@ toys_vm_deps = [
 toys_vm_lib = static_library(
     'toys_vm',
     sources: files(
-        'vm.c',
+        'vm/vm.c',
+        'vm/prog.c',
     ),
     include_directories: [
         inc,

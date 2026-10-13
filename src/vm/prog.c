@@ -1,0 +1,205 @@
+#include "toys/prog.h"
+#include "toys/debug.h"
+#include "toys/file.h"
+#include "toys/vec_internal.h"
+
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+
+
+/* Read and validate the file header, bounds-checking the phdr array. */
+static bool prog_read_header(const char *path, const WstFile *file,
+                             WstProgHeader *hdr_out)
+{
+    assert(path != NULL);
+    assert(file != NULL);
+    assert(hdr_out != NULL);
+
+    if (file->size < sizeof(WstProgHeader)) {
+        LOG_E("'%s' too small for prog header", path);
+        return false;
+    }
+
+    memcpy(hdr_out, file->data, sizeof(*hdr_out));
+
+    if (memcmp(hdr_out->magic, WST_PROG_MAGIC, sizeof(hdr_out->magic)) != 0) {
+        LOG_E("'%s' has bad magic", path);
+        return false;
+    }
+
+    if (hdr_out->version != WST_PROG_VERSION) {
+        LOG_E("'%s' has unsupported version %u", path, hdr_out->version);
+        return false;
+    }
+
+    if (hdr_out->phoff > file->size ||
+        hdr_out->phnum > (file->size - hdr_out->phoff) / sizeof(WstProgSegment)) {
+        LOG_E("'%s' has program headers past file end", path);
+        return false;
+    }
+
+    return true;
+}
+
+/* Fetch one segment by index, header bounds were checked above. */
+static void prog_get_seg(const WstFile *file, const WstProgHeader *hdr,
+                         uint64_t idx, WstProgSegment *seg_out)
+{
+    assert(file != NULL);
+    assert(hdr != NULL);
+    assert(seg_out != NULL);
+
+    memcpy(seg_out, file->data + hdr->phoff + idx * sizeof(*seg_out),
+           sizeof(*seg_out));
+}
+
+/* Check file bounds, memory size and address cap of a single segment. */
+static bool prog_check_seg(const char *path, const WstFile *file,
+                           uint64_t idx, const WstProgSegment *seg,
+                           size_t mem_max)
+{
+    assert(path != NULL);
+    assert(file != NULL);
+    assert(seg != NULL);
+
+    if (seg->filesz > file->size || seg->offset > file->size - seg->filesz) {
+        LOG_E("'%s' segment %llu past file end", path,
+              (unsigned long long)idx);
+        return false;
+    }
+
+    if (seg->memsz < seg->filesz) {
+        LOG_E("'%s' segment %llu memory smaller than file part",
+              path, (unsigned long long)idx);
+        return false;
+    }
+
+    if (mem_max != 0 &&
+        (seg->memsz > mem_max || seg->vaddr > mem_max - seg->memsz)) {
+        LOG_E("'%s' segment %llu past address space end",
+              path, (unsigned long long)idx);
+        return false;
+    }
+
+    if (seg->vaddr + seg->memsz < seg->vaddr) {
+        LOG_E("'%s' segment %llu address overflows", path,
+              (unsigned long long)idx);
+        return false;
+    }
+
+    return true;
+}
+
+/* Check the new segment against all previous ones for overlap. */
+static bool prog_check_overlap(const char *path, const WstFile *file,
+                               const WstProgHeader *hdr, uint64_t idx,
+                               const WstProgSegment *seg)
+{
+    assert(path != NULL);
+    assert(file != NULL);
+    assert(hdr != NULL);
+    assert(seg != NULL);
+
+    for (uint64_t j = 0; j < idx; j++) {
+        WstProgSegment prev = { 0 };
+        prog_get_seg(file, hdr, j, &prev);
+        if (seg->vaddr < prev.vaddr + prev.memsz &&
+            prev.vaddr < seg->vaddr + seg->memsz) {
+            LOG_E("'%s' segments %llu and %llu overlap",
+                  path, (unsigned long long)j, (unsigned long long)idx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* Validate every segment, computing the total span `vaddr + memsz`. */
+static bool prog_check_segs(const char *path, const WstFile *file,
+                            const WstProgHeader *hdr, size_t mem_max,
+                            size_t *total_out)
+{
+    assert(path != NULL);
+    assert(file != NULL);
+    assert(hdr != NULL);
+    assert(total_out != NULL);
+
+    size_t total = 0;
+    for (uint64_t i = 0; i < hdr->phnum; i++) {
+        WstProgSegment seg = { 0 };
+        prog_get_seg(file, hdr, i, &seg);
+
+        if (!prog_check_seg(path, file, i, &seg, mem_max))
+            return false;
+        if (!prog_check_overlap(path, file, hdr, i, &seg))
+            return false;
+
+        if (seg.vaddr + seg.memsz > total) {
+            if (seg.vaddr + seg.memsz > SIZE_MAX) {
+                LOG_E("'%s' segment %llu past size_t range",
+                      path, (unsigned long long)i);
+                return false;
+            }
+            total = (size_t)(seg.vaddr + seg.memsz);
+        }
+    }
+
+    *total_out = total;
+    return true;
+}
+
+/* Entry must point at a whole 4-byte word inside the span. */
+static bool prog_check_entry(const char *path, const WstProgHeader *hdr,
+                             size_t total)
+{
+    assert(path != NULL);
+    assert(hdr != NULL);
+
+    if (hdr->entry % 4 != 0 || hdr->entry >= total ||
+        total - (size_t)hdr->entry < 4) {
+        LOG_E("'%s' has bad entry point", path);
+        return false;
+    }
+
+    return true;
+}
+
+bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
+                   size_t mem_max)
+{
+    assert(mem != NULL);
+    assert(entry_out != NULL);
+    assert(path != NULL);
+
+    WstFile file = { 0 };
+    if (!wst_file_open(path, &file))
+        return false;
+
+    WstProgHeader hdr = { 0 };
+    size_t total_segs = 0;
+
+    if (!prog_read_header(path, &file, &hdr) || 
+        !prog_check_segs(path, &file, &hdr, mem_max, &total_segs) ||
+        !prog_check_entry(path, &hdr, total_segs) ||
+        wst_vec_u8_resize(mem, total_segs) != WST_VEC_NO_ERR)
+    {
+        wst_file_close(&file);
+        return false;
+    }
+
+    for (uint64_t i = 0; i < hdr.phnum; i++) {
+        WstProgSegment seg = { 0 };
+        prog_get_seg(&file, &hdr, i, &seg);
+
+        memcpy(&mem->data[(size_t)seg.vaddr], file.data + (size_t)seg.offset,
+               (size_t)seg.filesz);
+    }
+    VEC_SEAL((WstVecVoid *)mem, sizeof(uint8_t));
+
+    *entry_out = (size_t)hdr.entry;
+
+    LOG_I("loaded '%s': %zu bytes at entry %zu", path, total_segs, *entry_out);
+    wst_file_close(&file);
+    return true;
+}
