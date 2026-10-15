@@ -157,12 +157,13 @@ int main(int argc, char **argv)
     if (verbose)
         wst_log_set_max_prio(WST_LOG_VERBOSE);
 
-    if (!disasm && out_path == NULL) {
+    if (disasm)
+        return run_disasm(in_path, count);
+
+    if (out_path == NULL) {
         fprintf(stderr, "out_filename is required to assemble\n");
         return EXIT_FAILURE;
     }
 
-    if (disasm)
-        return run_disasm(in_path, count);
     return run_asm(in_path, out_path);
 }
