@@ -1,7 +1,6 @@
 /.vscode
 /.opencode
 /builddir
-/docs
 .gdb_history
 *.swp
 /subprojects/wst-toys/
