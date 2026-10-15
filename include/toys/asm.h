@@ -10,11 +10,13 @@
 /**
  * Assembled program before linking, code words plus data bytes.
  * Data addresses are data segment relative in code.
- * `wst_prog_save` links the two into a program file.
+ * `entry` is the `:_start` address, zero when the source has none.
+ * `wst_prog_save` links code and data into a program file with entry.
  */
 typedef struct {
     WstVecU32 code;
     WstVecU8 data;
+    size_t entry;
 } WstAsmObject;
 
 /**

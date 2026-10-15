@@ -59,9 +59,11 @@ static bool asm_data_num(const char *tok, unsigned long long *num_out)
 
     char *end = NULL;
     errno = 0;
+
     unsigned long long val = strtoull(tok, &end, 0);
     if (errno != 0 || end == tok)
         return false;
+
     end = (char *)asm_skip_ws(end);
     if (*end != '\0')
         return false;
@@ -78,9 +80,11 @@ static bool asm_data_double(const char *tok, double *num_out)
 
     char *end = NULL;
     errno = 0;
+
     double val = strtod(tok, &end);
     if (errno != 0 || end == tok)
         return false;
+
     end = (char *)asm_skip_ws(end);
     if (*end != '\0')
         return false;

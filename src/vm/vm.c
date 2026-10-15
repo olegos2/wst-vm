@@ -134,18 +134,18 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
         return false;
 
     size_t base = (ctx->mem.length + 7) & ~(size_t)7;
-    size_t ssize = vm_stack_size(ctx);
+    size_t stack_size = vm_stack_size(ctx);
     size_t limit = vm_mem_limit(ctx);
-    if (ssize > limit || base > limit - ssize) {
-        LOG_E("stack of %zu bytes past address space end", ssize);
+    if (stack_size > limit || base > limit - stack_size) {
+        LOG_E("stack of %zu bytes past address space end", stack_size);
         return false;
     }
-    if (wst_vec_u8_resize(&ctx->mem, base + ssize) != WST_VEC_NO_ERR)
+    if (wst_vec_u8_resize(&ctx->mem, base + stack_size) != WST_VEC_NO_ERR)
         return false;
 
     ctx->entry = entry;
     ctx->stack.base = base;
-    ctx->stack.top = base + ssize;
+    ctx->stack.top = base + stack_size;
     return true;
 }
 

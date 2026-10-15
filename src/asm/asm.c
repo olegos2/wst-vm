@@ -48,6 +48,7 @@ static bool asm_section(AsmCtx *ctx, const char *line, size_t lineno)
     assert(line != NULL);
 
     const char *name = asm_skip_ws(line + strlen("section"));
+
     if (strcmp(name, ".text") == 0) {
         ctx->section = ASM_TEXT;
         return true;
@@ -87,6 +88,7 @@ static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
     uint32_t word = 0;
     char *sym = NULL;
     WstVmInstrFormat fmt = WST_VM_INSTR_FORMAT_INVALID;
+
     if (!asm_parse_instr(line, lineno, true, &word, &sym, &fmt))
         return false;
 
@@ -94,12 +96,14 @@ static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
         free(sym);
         return false;
     }
+
     if (sym != NULL) {
         bool ok = asm_fix_add(ctx, off, fmt, sym, lineno);
         free(sym);
         if (!ok)
             return false;
     }
+
     return true;
 }
 
@@ -114,10 +118,12 @@ static bool asm_data_line(AsmCtx *ctx, const char *line, size_t lineno)
         LOG_E("line %zu: labels belong in section .text", lineno);
         return false;
     }
+
     if (strchr(line, ':') == NULL) {
         LOG_E("line %zu: instructions belong in section .text", lineno);
         return false;
     }
+
     return asm_data_entry(ctx, (char *)line, lineno);
 }
 
@@ -138,13 +144,15 @@ static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
         return asm_label(ctx, p, lineno);
 
     /* `name:` outside .data is a misplaced data entry, not an instr. */
-    size_t nlen = 0;
-    while (asm_is_name_char(p[nlen]))
-        nlen++;
-    if (p[nlen] == ':') {
+    size_t name_len = 0;
+    while (asm_is_name_char(p[name_len]))
+        name_len++;
+
+    if (p[name_len] == ':') {
         LOG_E("line %zu: data entries belong in section .data", lineno);
         return false;
     }
+
     return asm_text_line(ctx, (char *)p, lineno);
 }
 
@@ -165,6 +173,7 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
         return false;
 
     uint32_t word = wst_vec_u32_get(&ctx->obj->code, fix->off / 4);
+
     switch (fix->fmt) {
     case WST_VM_INSTR_FORMAT_I:
     case WST_VM_INSTR_FORMAT_S:
@@ -181,10 +190,30 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
         LOG_E("line %zu: bad fixup format", fix->lineno);
         return false;
     }
+
     if (wst_vec_u32_set(&ctx->obj->code, fix->off / 4, word) != WST_VEC_NO_ERR) {
         LOG_E("line %zu: address space damaged", fix->lineno);
         return false;
     }
+
+    return true;
+}
+
+/* Entry address from `:_start`, zero when the source has none. */
+static bool asm_entry(AsmCtx *ctx)
+{
+    assert(ctx != NULL);
+
+    const AsmSym *start = asm_sym_find(ctx, "_start");
+    if (start == NULL)
+        return true;
+
+    if (start->type != ASM_SYM_LABEL) {
+        LOG_E("entry `_start` must be a code label");
+        return false;
+    }
+
+    ctx->obj->entry = start->addr;
     return true;
 }
 
@@ -250,6 +279,7 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
 
     wst_vec_u32_free(&out->code);
     wst_vec_u8_free(&out->data);
+    out->entry = 0;
 
     char *copy = calloc(1, len + 1);
     if (copy == NULL) {
@@ -268,11 +298,13 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
     size_t lineno = 0;
     char *pos = copy;
     while (*pos != '\0') {
-        char *nl = strchr(pos, '\n');
-        size_t llen = nl != NULL ? (size_t)(nl - pos) : strlen(pos);
-        if (llen > 0 && pos[llen - 1] == '\r')
-            llen--;
-        pos[llen] = '\0';
+        char *line_end = strchr(pos, '\n');
+
+        size_t line_len = line_end != NULL ? (size_t)(line_end - pos) : strlen(pos);
+        if (line_len > 0 && pos[line_len - 1] == '\r')
+            line_len--;
+
+        pos[line_len] = '\0';
         lineno++;
 
         asm_strip_comment(pos);
@@ -280,11 +312,13 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
             ok = false;
             break;
         }
-        pos += llen + (nl != NULL ? 1 : 0);
+        pos += line_len + (line_end != NULL ? 1 : 0);
     }
 
     if (ok)
         ok = asm_resolve(&ctx);
+    if (ok)
+        ok = asm_entry(&ctx);
 
     asm_tables_free(&ctx);
     free(copy);

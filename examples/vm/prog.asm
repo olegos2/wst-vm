@@ -4,6 +4,7 @@
 # Build with: asm prog.asm prog.bin
 
 section .text
+:_start
     addi x1, x0, 2
     addi x2, x0, 3
     add x3, x1, x2
