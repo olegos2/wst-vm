@@ -2,7 +2,6 @@
 #include "asm_priv.h"
 #include "toys/debug.h"
 #include "toys/prog.h"
-#include "toys/vec_internal.h"
 #include "toys/vm.h"
 
 #include <assert.h>
@@ -16,26 +15,28 @@ void wst_vm_asm_object_free(WstAsmObject *obj)
     if (obj == NULL)
         return;
 
-    WstVecErr e1 = wst_vec_u8_free(&obj->code);
-    WstVecErr e2 = wst_vec_u8_free(&obj->data);
-    if (e1 != WST_VEC_NO_ERR || e2 != WST_VEC_NO_ERR)
-        LOG_W("object damaged: %s / %s", wst_vec_err_str(e1), wst_vec_err_str(e2));
+    WstVecErr err_code = wst_vec_u8_free(&obj->code);
+    WstVecErr err_data = wst_vec_u8_free(&obj->data);
+
+    if (err_code != WST_VEC_NO_ERR || err_data != WST_VEC_NO_ERR)
+        LOG_W("object damaged: code %s, data %s",
+              wst_vec_err_str(err_code), wst_vec_err_str(err_data));
 }
 
 /* `#` starts a comment unless inside a double-quoted string. */
 static void asm_strip_comment(char *line)
 {
     bool in_str = false;
-    for (char *p = line; *p != '\0'; p++) {
+    for (char *pos = line; *pos != '\0'; pos++) {
         if (in_str) {
-            if (*p == '\\' && p[1] != '\0')
-                p++;
-            else if (*p == '"')
+            if (*pos == '\\' && pos[1] != '\0')
+                pos++;
+            else if (*pos == '"')
                 in_str = false;
-        } else if (*p == '"') {
+        } else if (*pos == '"') {
             in_str = true;
-        } else if (*p == '#') {
-            *p = '\0';
+        } else if (*pos == '#') {
+            *pos = '\0';
             break;
         }
     }
@@ -132,7 +133,9 @@ static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
     }
 
     /* `name:` outside .data is a misplaced data entry, not an instr. */
-    size_t nlen = strspn(p, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_");
+    size_t nlen = 0;
+    while (asm_is_name_char(p[nlen]))
+        nlen++;
     if (p[nlen] == ':') {
         LOG_E("line %zu: data entries belong in section .data", lineno);
         return false;
@@ -140,7 +143,45 @@ static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
     return asm_text_line(ctx, (char *)p, lineno);
 }
 
-/* Second pass: every `:name` becomes an absolute or PC-relative imm. */
+/* Patch one recorded `:name` use with its absolute or PC-relative imm. */
+static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
+{
+    assert(ctx != NULL);
+    assert(fix != NULL);
+
+    int64_t imm = 0;
+    if (fix->fmt == WST_VM_INSTR_FORMAT_B ||
+        fix->fmt == WST_VM_INSTR_FORMAT_J)
+        imm = (int64_t)target - (int64_t)fix->off;
+    else
+        imm = (int64_t)target;
+
+    if (!asm_check_imm(fix->fmt, imm, fix->lineno))
+        return false;
+
+    uint32_t word = 0;
+    memcpy(&word, &ctx->obj->code.data[fix->off], sizeof(word));
+    switch (fix->fmt) {
+    case WST_VM_INSTR_FORMAT_I:
+    case WST_VM_INSTR_FORMAT_S:
+    case WST_VM_INSTR_FORMAT_B:
+        word = asm_set_imm19(word, imm);
+        break;
+    case WST_VM_INSTR_FORMAT_J:
+        word = asm_set_imm22(word, imm);
+        break;
+    case WST_VM_INSTR_FORMAT_U:
+        word = asm_set_imm20(word, imm);
+        break;
+    default:
+        LOG_E("line %zu: bad fixup format", fix->lineno);
+        return false;
+    }
+    memcpy(&ctx->obj->code.data[fix->off], &word, sizeof(word));
+    return true;
+}
+
+/* Second pass, every `:name` becomes an absolute or PC relative imm. */
 static bool asm_resolve(AsmCtx *ctx)
 {
     assert(ctx != NULL);
@@ -164,37 +205,10 @@ static bool asm_resolve(AsmCtx *ctx)
             target = data_base + target;
         }
 
-        int64_t imm = 0;
-        if (fix->fmt == WST_VM_INSTR_FORMAT_B ||
-            fix->fmt == WST_VM_INSTR_FORMAT_J)
-            imm = (int64_t)target - (int64_t)fix->off;
-        else
-            imm = (int64_t)target;
-
-        if (!asm_check_imm(fix->fmt, imm, fix->lineno))
+        if (!asm_patch_word(ctx, fix, target))
             return false;
-
-        uint32_t word = 0;
-        memcpy(&word, &ctx->obj->code.data[fix->off], sizeof(word));
-        switch (fix->fmt) {
-        case WST_VM_INSTR_FORMAT_I:
-        case WST_VM_INSTR_FORMAT_S:
-        case WST_VM_INSTR_FORMAT_B:
-            word = asm_set_imm19(word, imm);
-            break;
-        case WST_VM_INSTR_FORMAT_J:
-            word = asm_set_imm22(word, imm);
-            break;
-        case WST_VM_INSTR_FORMAT_U:
-            word = asm_set_imm20(word, imm);
-            break;
-        default:
-            LOG_E("line %zu: bad fixup format", fix->lineno);
-            return false;
-        }
-        memcpy(&ctx->obj->code.data[fix->off], &word, sizeof(word));
     }
-    VEC_SEAL((WstVecVoid *)&ctx->obj->code, sizeof(uint8_t));
+    wst_vec_u8_seal(&ctx->obj->code);
     return true;
 }
 
@@ -231,7 +245,7 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
     wst_vec_u8_free(&out->code);
     wst_vec_u8_free(&out->data);
 
-    char *copy = malloc(len + 1);
+    char *copy = calloc(1, len + 1);
     if (copy == NULL) {
         LOG_E("out of memory");
         return false;

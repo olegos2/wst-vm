@@ -1,8 +1,10 @@
 #include "asm_priv.h"
 #include "toys/debug.h"
+#include "toys/vm.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,7 +66,7 @@ bool asm_check_imm(WstVmInstrFormat fmt, int64_t imm, size_t lineno)
     }
 
     if (!ok)
-        LOG_E("line %zu: immediate %lld out of range", lineno, (long long)imm);
+        LOG_E("line %zu: immediate %" PRId64 " out of range", lineno, imm);
     return ok;
 }
 
@@ -164,11 +166,6 @@ static bool asm_split_ops(char *args, char *toks[3], size_t *ntoks_out,
     return true;
 }
 
-/*
- * Encode one instruction, `line` holds `mnemonic operands...` already
- * stripped of comments. Numeric operands encode inline, a `:name`
- * immediate needs `allow_sym` and comes back in `sym_out`.
- */
 bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                      uint32_t *word_out, char **sym_out,
                      WstVmInstrFormat *fmt_out)
@@ -193,15 +190,10 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
     if (!asm_split_ops((char *)mp + mlen, toks, &ntoks, lineno))
         return false;
 
-    unsigned slots[4] = { 0, 0, 0, 0 };
-    size_t nslots = 0;
-    wst_vm_format_slots(desc->format, slots, &nslots);
-
+    /* Operand bits ascend in assembly order: RD, RS1, RS2, IMM. */
     size_t need = 0;
-    for (size_t i = 0; i < nslots; i++) {
-        if ((desc->operands & slots[i]) != 0)
-            need++;
-    }
+    for (unsigned m = desc->operands; m != 0; m >>= 1)
+        need += m & 1u;
     if (ntoks != need) {
         LOG_E("line %zu: '%s' needs %zu operands, got %zu",
               lineno, desc->mnemonic, need, ntoks);
@@ -211,46 +203,50 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
     unsigned rd = 0, rs1 = 0, rs2 = 0;
     int64_t imm = 0;
     size_t ti = 0;
-    for (size_t i = 0; i < nslots; i++) {
-        if ((desc->operands & slots[i]) == 0)
+    for (unsigned slot = WST_VM_OPND_RD; slot <= WST_VM_OPND_IMM; slot <<= 1) {
+        if ((desc->operands & slot) == 0)
             continue;
 
         const char *tok = toks[ti++];
-        if (slots[i] == WST_VM_OPND_IMM) {
-            if (tok[0] == ':') {
-                if (!allow_sym) {
-                    LOG_E("line %zu: label '%s' needs whole-source assembly",
-                          lineno, tok);
-                    return false;
-                }
-                if (!asm_valid_name(tok + 1)) {
-                    LOG_E("line %zu: bad symbol name '%s'", lineno, tok);
-                    return false;
-                }
-                *sym_out = strdup(tok + 1);
-                if (*sym_out == NULL) {
-                    LOG_E("line %zu: out of memory", lineno);
-                    return false;
-                }
-                imm = 0;
-            } else {
-                if (!asm_parse_num(tok, &imm)) {
-                    LOG_E("line %zu: bad number '%s'", lineno, tok);
-                    return false;
-                }
-                if (!asm_check_imm(desc->format, imm, lineno))
-                    return false;
-            }
-        } else {
-            bool is_float = (desc->fregs & slots[i]) != 0;
-            unsigned *dst = slots[i] == WST_VM_OPND_RD ? &rd :
-                            slots[i] == WST_VM_OPND_RS1 ? &rs1 : &rs2;
+        
+        if (slot != WST_VM_OPND_IMM) {
+            bool is_float = (desc->fregs & slot) != 0;
+            unsigned *dst = slot == WST_VM_OPND_RD ? &rd :
+                            slot == WST_VM_OPND_RS1 ? &rs1 : &rs2;
             if (!asm_parse_reg(tok, is_float, dst)) {
                 LOG_E("line %zu: bad %s register '%s'",
                       lineno, is_float ? "float" : "integer", tok);
                 return false;
             }
+            continue;
         }
+
+        if (tok[0] != ':') {
+            if (!asm_parse_num(tok, &imm)) {
+                LOG_E("line %zu: bad number '%s'", lineno, tok);
+                return false;
+            }
+            if (!asm_check_imm(desc->format, imm, lineno))
+                return false;
+
+            continue;
+        }
+
+        if (!allow_sym) {
+            LOG_E("line %zu: label '%s' needs whole-source assembly",
+                    lineno, tok);
+            return false;
+        }
+        if (!asm_valid_name(tok + 1)) {
+            LOG_E("line %zu: bad symbol name '%s'", lineno, tok);
+            return false;
+        }
+        *sym_out = strdup(tok + 1);
+        if (*sym_out == NULL) {
+            LOG_E("line %zu: out of memory", lineno);
+            return false;
+        }
+        imm = 0;
     }
 
     uint32_t word = (uint32_t)asm_opcode(desc);
@@ -291,14 +287,8 @@ bool asm_emit_word(AsmCtx *ctx, uint32_t word, size_t lineno)
 {
     assert(ctx != NULL);
 
-    uint8_t buf[4] = {
-        (uint8_t)(word & 0xFFu),
-        (uint8_t)((word >> 8) & 0xFFu),
-        (uint8_t)((word >> 16) & 0xFFu),
-        (uint8_t)((word >> 24) & 0xFFu),
-    };
-    for (size_t i = 0; i < sizeof(buf); i++) {
-        if (wst_vec_u8_push(&ctx->obj->code, buf[i]) != WST_VEC_NO_ERR) {
+    for (size_t i = 0; i < 4; i++) {
+        if (wst_vec_u8_push(&ctx->obj->code, (uint8_t)((word >> (8 * i)) & 0xFFu)) != WST_VEC_NO_ERR) {
             LOG_E("line %zu: out of memory", lineno);
             return false;
         }

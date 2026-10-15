@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 
-/** Symbol kind: code label address or data blob offset. */
+/** Type of symbol in assembly. */
 typedef enum {
     ASM_SYM_LABEL,
     ASM_SYM_DATA,
@@ -43,7 +43,7 @@ typedef struct {
     size_t cap;
 } AsmFixups;
 
-/** First-pass state: output buffers, symbol table, fixup list, section. */
+/** First-pass state, output buffers, symbol table, fixup list, section. */
 typedef struct {
     WstAsmObject *obj;
     AsmSyms syms;
@@ -78,6 +78,7 @@ static inline bool asm_valid_name(const char *name)
 {
     if (!asm_is_name_start(name[0]))
         return false;
+
     for (const char *p = name + 1; *p != '\0'; p++) {
         if (!asm_is_name_char(*p))
             return false;
@@ -86,25 +87,41 @@ static inline bool asm_valid_name(const char *name)
 }
 
 
-/* sym.c */
+/** Look up a symbol by exact name, NULL when missing. */
 const AsmSym *asm_sym_find(const AsmCtx *ctx, const char *name);
+
+/** Record a label or data name, false on duplicates. */
 bool asm_sym_add(AsmCtx *ctx, const char *name, size_t addr,
                  AsmSymType type, size_t lineno);
+
+/** Record an unresolved `:name` use for the second pass. */
 bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
                  const char *name, size_t lineno);
+
+/** Free tables and the names in them. */
 void asm_tables_free(AsmCtx *ctx);
 
-/* instr.c */
+/*
+ * Encode one instruction, `line` holds `mnemonic operands...` already
+ * stripped of comments. Numeric operands encode inline, a `:name`
+ * immediate needs `allow_sym` and comes back in `sym_out`.
+ */
 bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                      uint32_t *word_out, char **sym_out,
                      WstVmInstrFormat *fmt_out);
+
+/** Append a word (instruction) to the code buffer, little-endian. */
 bool asm_emit_word(AsmCtx *ctx, uint32_t word, size_t lineno);
+
+/** Range check an immediate for its format. */
 bool asm_check_imm(WstVmInstrFormat fmt, int64_t imm, size_t lineno);
+
+/** Patch the imm field of an encoded word. */
 uint32_t asm_set_imm19(uint32_t word, int64_t imm);
 uint32_t asm_set_imm22(uint32_t word, int64_t imm);
 uint32_t asm_set_imm20(uint32_t word, int64_t imm);
 
-/* data.c */
+/** Parse and emit one `name: <type> <value>` data line. */
 bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno);
 
 #endif /* ASM_PRIV_H */

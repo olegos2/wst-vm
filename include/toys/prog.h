@@ -56,8 +56,7 @@ bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
 
 /**
  * Data segment address for `code_len` code bytes, first 8-aligned
- * address past the code. Shared by the assembler and the saver so
- * assembled data addresses match the linked binary layout.
+ * address past the code.
  */
 size_t wst_prog_data_addr(size_t code_len);
 

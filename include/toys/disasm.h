@@ -12,6 +12,6 @@
  *
  * @return `true` on success, `false` on unknown opcode or not enough space.
  */
-bool wst_vm_disasm_one(uint32_t word, char *buf, size_t cap);
+bool wst_vm_disasm_word(uint32_t word, char *buf, size_t cap);
 
 #endif /* TOYS_DISASM_H */

@@ -14,9 +14,6 @@
 
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
-/* Demo cap for `--disasm` without `--count`, code runs to `hlt` first. */
-#define ASM_DISASM_CAP (65536)
-
 
 static int run_asm(const char *in_path, const char *out_path)
 {
@@ -64,7 +61,7 @@ static int run_disasm(const char *path, int count)
         memcpy(&word, &mem.data[addr], sizeof(word));
 
         char buf[64] = { 0 };
-        if (!wst_vm_disasm_one(word, buf, sizeof(buf))) {
+        if (!wst_vm_disasm_word(word, buf, sizeof(buf))) {
             ret = EXIT_FAILURE;
             break;
         }
@@ -77,10 +74,6 @@ static int run_disasm(const char *path, int count)
             break;
         if (count > 0 && done >= count)
             break;
-        if (done >= ASM_DISASM_CAP) {
-            LOG_W("stopping after %d words, use --count to go on", done);
-            break;
-        }
     }
 
     wst_vec_u8_free(&mem);

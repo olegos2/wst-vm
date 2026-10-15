@@ -3,6 +3,7 @@
 #include "toys/vm.h"
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdio.h>
 
 
@@ -49,7 +50,7 @@ static bool dis_imm(int64_t imm, char *buf, size_t cap, size_t *len_inout)
     assert(buf != NULL);
     assert(len_inout != NULL);
 
-    int n = snprintf(buf + *len_inout, cap - *len_inout, "%lld", (long long)imm);
+    int n = snprintf(buf + *len_inout, cap - *len_inout, "%" PRId64 , imm);
     if (n < 0 || (size_t)n >= cap - *len_inout)
         return false;
 
@@ -68,7 +69,7 @@ static int64_t dis_sign_ext(uint32_t field, unsigned bits)
     return (int64_t)(clean ^ sign) - (int64_t)sign;
 }
 
-bool wst_vm_disasm_one(uint32_t word, char *buf, size_t cap)
+bool wst_vm_disasm_word(uint32_t word, char *buf, size_t cap)
 {
     assert(buf != NULL);
 
@@ -124,25 +125,20 @@ bool wst_vm_disasm_one(uint32_t word, char *buf, size_t cap)
         return false;
 
     bool first = true;
-    unsigned order[4] = { 0, 0, 0, 0 };
-    size_t norder = 0;
-    wst_vm_format_slots(desc->format, order, &norder);
-    if (norder == 0)
-        return false;
 
-    for (size_t i = 0; i < norder; i++) {
-        if ((desc->operands & order[i]) == 0)
+    for (unsigned slot = WST_VM_OPND_RD; slot <= WST_VM_OPND_IMM; slot <<= 1) {
+        if ((desc->operands & slot) == 0)
             continue;
         if (!dis_put(first ? " " : ", ", buf, cap, &len))
             return false;
         first = false;
-        if (order[i] == WST_VM_OPND_IMM) {
+        if (slot == WST_VM_OPND_IMM) {
             if (!dis_imm(imm, buf, cap, &len))
                 return false;
         } else {
-            unsigned reg = order[i] == WST_VM_OPND_RD ? rd :
-                           order[i] == WST_VM_OPND_RS1 ? rs1 : rs2;
-            if (!dis_reg(desc->fregs, order[i], reg, buf, cap, &len))
+            unsigned reg = slot == WST_VM_OPND_RD ? rd :
+                           slot == WST_VM_OPND_RS1 ? rs1 : rs2;
+            if (!dis_reg(desc->fregs, slot, reg, buf, cap, &len))
                 return false;
         }
     }

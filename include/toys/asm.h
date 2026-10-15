@@ -45,7 +45,7 @@ bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out);
  *   `u64`/`f64` entries align to 8, `u32` to 4.
  *
  * Line forms in `.text`: empty line, `mnemonic operands...`, `:label`.
- * Blank lines and `#` comments are skipped.
+ * `#` comments are stripped, blank lines are skipped.
  *
  * Two passes: first pass emits words and records labels with data
  * names and their offsets. Second pass resolves every `:name` operand.

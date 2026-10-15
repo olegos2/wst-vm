@@ -67,25 +67,25 @@
     }
 
 
-static void vm_divmod(uint64_t dividend, uint64_t divisor, uint64_t *quot, uint64_t *rem)
+static void vm_divmod(uint64_t a, uint64_t b, uint64_t *quot, uint64_t *rem)
 {
-    if (divisor == 0) {
+    if (b == 0) {
         *quot = ~(uint64_t)0;
-        *rem = dividend;
+        *rem = a;
         return;
     }
 
-    int64_t signed_dividend = (int64_t)dividend;
-    int64_t signed_divisor = (int64_t)divisor;
+    int64_t sign_a = (int64_t)a;
+    int64_t sign_b = (int64_t)b;
 
-    if (signed_dividend == INT64_MIN && signed_divisor == -1) {
+    if (sign_a == INT64_MIN && sign_b == -1) {
         *quot = (uint64_t)INT64_MIN;
         *rem = 0;
         return;
     }
 
-    *quot = (uint64_t)(signed_dividend / signed_divisor);
-    *rem = (uint64_t)(signed_dividend % signed_divisor);
+    *quot = (uint64_t)(sign_a / sign_b);
+    *rem = (uint64_t)(sign_a % sign_b);
 }
 
 /* Exact comparison is intended here: feq follows RISC-V, where
@@ -100,7 +100,7 @@ static bool vm_fp_eq(double lhs, double rhs)
 
 #pragma GCC diagnostic pop
 
-/* One stdin line for `ini`/`inf`, fatal on EOF or overlong lines. */
+
 #define VM_STDIN_LINE_CAP (256)
 
 static void vm_stdin_line(char *buf, size_t pc)
@@ -229,24 +229,24 @@ void vm_exec_fst(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 void vm_exec_pushqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    vm_stack_push(vm, ctx, ins->addr, VM_REG_READ(vm, ins->rs1));
+    vm_stack_push64(vm, ctx, ins->addr, VM_REG_READ(vm, ins->rs1));
 }
 
 void vm_exec_pushqv(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t bits = 0;
     memcpy(&bits, &vm->fp[ins->rs1], sizeof(bits));
-    vm_stack_push(vm, ctx, ins->addr, bits);
+    vm_stack_push64(vm, ctx, ins->addr, bits);
 }
 
 void vm_exec_popqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    VM_REG_WRITE(vm, ins->rd, vm_stack_pop(vm, ctx, ins->addr));
+    VM_REG_WRITE(vm, ins->rd, vm_stack_pop64(vm, ctx, ins->addr));
 }
 
 void vm_exec_popqv(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t bits = vm_stack_pop(vm, ctx, ins->addr);
+    uint64_t bits = vm_stack_pop64(vm, ctx, ins->addr);
     memcpy(&vm->fp[ins->rd], &bits, sizeof(bits));
 }
 
@@ -340,7 +340,7 @@ void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
     uint64_t len = vm->regs[3];
 
     if (fd != 1 && fd != 2) {
-        LOG_E("ecall write to fd %llu at pc %zu", (unsigned long long)fd, addr);
+        LOG_E("ecall write to fd %" PRIu64 " at pc %zu", fd, addr);
         exit(EXIT_FAILURE);
     }
 
@@ -357,25 +357,28 @@ void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t num = (uint64_t)ins->imm;
 
-    if (num >= vm_syscall_count || vm_syscalls[(size_t)num] == NULL) {
-        LOG_E("unknown syscall %llu at pc %zu", (unsigned long long)num, ins->addr);
+    /* Like opcodes: out-of-range numbers fall out, NULL entries are unknown. */
+    WstVmSyscallHandler handler =
+        num < WST_VM_SYSCALL_COUNT ? vm_syscalls[(size_t)num] : NULL;
+    if (handler == NULL) {
+        LOG_E("unknown syscall %" PRIu64 " at pc %zu", num, ins->addr);
         exit(EXIT_FAILURE);
     }
 
-    vm_syscalls[(size_t)num](vm, ctx, ins->addr);
+    handler(vm, ctx, ins->addr);
 }
 
 void vm_exec_call(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    vm_stack_push(vm, ctx, ins->addr, (uint64_t)(ins->addr + 4));
+    vm_stack_push64(vm, ctx, ins->addr, (uint64_t)(ins->addr + 4));
     vm->pc = (size_t)((int64_t)ins->addr + ins->imm);
 }
 
 void vm_exec_ret(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t target = vm_stack_pop(vm, ctx, ins->addr);
+    uint64_t target = vm_stack_pop64(vm, ctx, ins->addr);
     if (target % 4 != 0) {
-        LOG_E("misaligned ret target %llu", (unsigned long long)target);
+        LOG_E("misaligned ret target %" PRIu64 , target);
         exit(EXIT_FAILURE);
     }
     vm->pc = (size_t)target;

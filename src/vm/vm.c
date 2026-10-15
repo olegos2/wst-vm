@@ -2,9 +2,9 @@
 #include "vm_priv.h"
 #include "toys/debug.h"
 #include "toys/prog.h"
-#include "toys/vec_internal.h"
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,14 +33,14 @@ static size_t vm_stack_size(const WstVmContext *ctx)
 {
     assert(ctx != NULL);
 
-    return ctx->stack_size != 0 ? ctx->stack_size : WST_VM_STACK_DEFAULT_SIZE;
+    return ctx->stack.size != 0 ? ctx->stack.size : WST_VM_STACK_DEFAULT_SIZE;
 }
 
 static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 {
     size_t limit = vm_mem_limit(ctx);
     if (size > limit || addr > (uint64_t)limit - size) {
-        LOG_E("address %llu past address space end", (unsigned long long)addr);
+        LOG_E("address %" PRIu64 " past address space end", addr);
         exit(EXIT_FAILURE);
     }
 
@@ -64,22 +64,21 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
     { \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
         *(uint##bits##_t *)&ctx->mem.data[(size_t)addr] = value; \
-        VEC_SEAL((WstVecVoid *)&ctx->mem, sizeof(uint8_t)); \
+        wst_vec_u8_seal(&ctx->mem); \
     }
 
 VM_DEF_MEM_RW(64)
 VM_DEF_MEM_RW(32)
 
-/* Push 8 bytes to stack, `sp` grows down. */
-void vm_stack_push(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
+void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
 {
     uint64_t sp = vm->regs[WST_VM_REG_SP];
 
     if (sp % 8 != 0) {
-        LOG_E("misaligned sp %llu at pc %zu", (unsigned long long)sp, pc);
+        LOG_E("misaligned sp %" PRIu64 " at pc %zu", sp, pc);
         exit(EXIT_FAILURE);
     }
-    if (sp < (uint64_t)ctx->stack_base + 8 || sp > (uint64_t)ctx->stack_top) {
+    if (sp < (uint64_t)ctx->stack.base + 8 || sp > (uint64_t)ctx->stack.top) {
         LOG_E("stack overflow at pc %zu", pc);
         exit(EXIT_FAILURE);
     }
@@ -88,16 +87,15 @@ void vm_stack_push(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
     vm_mem_write64(ctx, sp - 8, value);
 }
 
-/* Pop 8 bytes from stack */
-uint64_t vm_stack_pop(WstVm *vm, WstVmContext *ctx, size_t pc)
+uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
 {
     uint64_t sp = vm->regs[WST_VM_REG_SP];
 
     if (sp % 8 != 0) {
-        LOG_E("misaligned sp %llu at pc %zu", (unsigned long long)sp, pc);
+        LOG_E("misaligned sp %" PRIu64 " at pc %zu", sp, pc);
         exit(EXIT_FAILURE);
     }
-    if (sp >= (uint64_t)ctx->stack_top || sp < (uint64_t)ctx->stack_base) {
+    if (sp >= (uint64_t)ctx->stack.top || sp < (uint64_t)ctx->stack.base) {
         LOG_E("stack underflow at pc %zu", pc);
         exit(EXIT_FAILURE);
     }
@@ -125,8 +123,8 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
 
     wst_vec_u8_free(&ctx->mem);
     ctx->entry = 0;
-    ctx->stack_base = 0;
-    ctx->stack_top = 0;
+    ctx->stack.base = 0;
+    ctx->stack.top = 0;
 
     size_t entry = 0;
     if (!wst_prog_load(&ctx->mem, &entry, path, vm_mem_limit(ctx)))
@@ -146,8 +144,8 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
         return false;
 
     ctx->entry = entry;
-    ctx->stack_base = base;
-    ctx->stack_top = base + ssize;
+    ctx->stack.base = base;
+    ctx->stack.top = base + ssize;
     return true;
 }
 
@@ -161,8 +159,8 @@ void wst_vm_context_free(WstVmContext *ctx)
         LOG_W("address space damaged: %s", wst_vec_err_str(err));
 
     ctx->entry = 0;
-    ctx->stack_base = 0;
-    ctx->stack_top = 0;
+    ctx->stack.base = 0;
+    ctx->stack.top = 0;
 }
 
 bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
@@ -231,7 +229,7 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
     if (desc->format == WST_VM_INSTR_FORMAT_I || desc->format == WST_VM_INSTR_FORMAT_S ||
         desc->format == WST_VM_INSTR_FORMAT_B || desc->format == WST_VM_INSTR_FORMAT_J ||
         desc->format == WST_VM_INSTR_FORMAT_U)
-        LOG_V("pc %zu: %s %lli", vm->pc, desc->mnemonic, (long long)ins->imm);
+        LOG_V("pc %zu: %s %" PRId64 , vm->pc, desc->mnemonic, ins->imm);
     else
         LOG_V("pc %zu: %s", vm->pc, desc->mnemonic);
     return true;

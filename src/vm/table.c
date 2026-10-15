@@ -4,47 +4,10 @@
 #include <stddef.h>
 
 
-/* Operand slots of a format in assembly order, shared by asm and disasm. */
-void wst_vm_format_slots(WstVmInstrFormat fmt, unsigned slots[4], size_t *n_out)
-{
-    switch (fmt) {
-    case WST_VM_INSTR_FORMAT_R:
-        slots[0] = WST_VM_OPND_RD;
-        slots[1] = WST_VM_OPND_RS1;
-        slots[2] = WST_VM_OPND_RS2;
-        *n_out = 3;
-        break;
-    case WST_VM_INSTR_FORMAT_I:
-        slots[0] = WST_VM_OPND_RD;
-        slots[1] = WST_VM_OPND_RS1;
-        slots[2] = WST_VM_OPND_IMM;
-        *n_out = 3;
-        break;
-    case WST_VM_INSTR_FORMAT_S:
-    case WST_VM_INSTR_FORMAT_B:
-        slots[0] = WST_VM_OPND_RS1;
-        slots[1] = WST_VM_OPND_RS2;
-        slots[2] = WST_VM_OPND_IMM;
-        *n_out = 3;
-        break;
-    case WST_VM_INSTR_FORMAT_U:
-    case WST_VM_INSTR_FORMAT_J:
-        slots[0] = WST_VM_OPND_RD;
-        slots[1] = WST_VM_OPND_IMM;
-        *n_out = 2;
-        break;
-    default:
-        *n_out = 0;
-        break;
-    }
-}
-
-const WstVmSyscallHandler vm_syscalls[] = {
+const WstVmSyscallHandler vm_syscalls[WST_VM_SYSCALL_COUNT] = {
     [WST_VM_SYS_EXIT] = vm_sys_exit,
     [WST_VM_SYS_WRITE] = vm_sys_write,
 };
-
-const size_t vm_syscall_count = sizeof(vm_syscalls) / sizeof(*vm_syscalls);
 
 const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT] = {
     [WST_VM_HLT]      = { "hlt",      WST_VM_INSTR_FORMAT_I,

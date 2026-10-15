@@ -89,6 +89,11 @@ typedef enum {
 } WstVmSyscall;
 
 /**
+ * Syscall table size, entries past the last named call stay NULL.
+ */
+#define WST_VM_SYSCALL_COUNT 2
+
+/**
  * Instruction formats, fixed 4-byte words with 7-bit opcode.
  */
 typedef enum {
@@ -103,6 +108,7 @@ typedef enum {
 
 /**
  * Operand slots an instruction uses, as a bitmask.
+ * Bits ascend in assembly order (rd, rs1, rs2, imm).
  */
 typedef enum {
     WST_VM_OPND_NONE = 0,
@@ -132,39 +138,46 @@ typedef struct WstVmInstr {
 
 /**
  * Per-thread vm state.
- *
- * The stack lives in virtual memory, top to bottom inside the
- * `[stack_base, stack_top]` range owned by `WstVmContext`.
- * `regs[WST_VM_REG_SP]` points at the first free slot above the top
- * item (empty stack means `sp == stack_top`). Pushes decrement by 8,
- * pops increment. Misaligned `sp`, overflow past `stack_base` and
- * underflow past `stack_top` are fatal.
  */
 typedef struct WstVm {
+    /** General purpose registers */
     uint64_t regs[8];
+    /** FP registers */
     double fp[8];
+    /** Program counter */
     size_t pc;
 } WstVm;
+
+/**
+ * Value stack taken from virtual memory after the program image.
+ *
+ * `size` is taken on load, zero means `WST_VM_STACK_DEFAULT_SIZE`.
+ * `base`/`top` are outputs set by `wst_vm_context_load`.
+ *
+ * The range lives in shared memory so stack slots stay directly
+ * addressable (`ld`/`st` with `x2`), the pointer itself is per-thread
+ * state in `WstVm.regs[WST_VM_REG_SP]`.
+ */
+typedef struct {
+    size_t size;
+    size_t base;
+    size_t top;
+} WstVmStack;
 
 /**
  * Vm context that manages virtual memory and saves entry point.
  *
  * `mem_max` caps `vaddr + memsz` on load and every load/store/fetch
  * past it is fatal. Zero means `WST_VM_MEM_DEFAULT_MAX`, set it
- * before `wst_vm_context_load` to override (example `vm --mem-max`).
+ * before `wst_vm_context_load` to override.
  *
- * `stack_size` is carved after the program image on load, zero means
- * `WST_VM_STACK_DEFAULT_SIZE`. `stack_base`/`stack_top` are outputs:
- * after load set `vm.regs[WST_VM_REG_SP]` to `stack_top`
- * (the example runner does this next to `vm.pc = ctx.entry`).
+ * After load user should update stack pointer to `ctx.stack.top`.
  */
 typedef struct WstVmContext {
     WstVecU8 mem;
     size_t entry;
     size_t mem_max;
-    size_t stack_size;
-    size_t stack_base;
-    size_t stack_top;
+    WstVmStack stack;
 } WstVmContext;
 
 /**
@@ -200,13 +213,6 @@ typedef struct {
 extern const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT];
 
 /**
- * Operand slots of a format in assembly order (`rd`, `rs1`, `rs2`,
- * `imm` subset). Writes at most 4 entries to `slots`, count to `n_out`,
- * zero on unknown formats. Shared by the assembler and disassembler.
- */
-void wst_vm_format_slots(WstVmInstrFormat fmt, unsigned slots[4], size_t *n_out);
-
-/**
  * Zero the state. Infallible, kept boolean for a stable API.
  *
  * @return `true` always.
@@ -215,8 +221,7 @@ bool wst_vm_init(WstVm *vm);
 
 /**
  * Load program file into a fresh address space, carving the stack
- * after the image. Honors `ctx->mem_max`/`ctx->stack_size`,
- * zero means default.
+ * after the image.
  *
  * @return `true` on success, `false` otherwise.
  */

@@ -1,10 +1,10 @@
 #include "toys/prog.h"
 #include "toys/debug.h"
 #include "toys/file.h"
-#include "toys/vec_internal.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -66,27 +66,27 @@ static bool prog_check_seg(const char *path, const WstFile *file,
     assert(seg != NULL);
 
     if (seg->filesz > file->size || seg->offset > file->size - seg->filesz) {
-        LOG_E("'%s' segment %llu past file end", path,
-              (unsigned long long)idx);
+        LOG_E("'%s' segment %" PRIu64 " past file end", path,
+              idx);
         return false;
     }
 
     if (seg->memsz < seg->filesz) {
-        LOG_E("'%s' segment %llu memory smaller than file part",
-              path, (unsigned long long)idx);
+        LOG_E("'%s' segment %" PRIu64 " memory smaller than file part",
+              path, idx);
         return false;
     }
 
     if (mem_max != 0 &&
         (seg->memsz > mem_max || seg->vaddr > mem_max - seg->memsz)) {
-        LOG_E("'%s' segment %llu past address space end",
-              path, (unsigned long long)idx);
+        LOG_E("'%s' segment %" PRIu64 " past address space end",
+              path, idx);
         return false;
     }
 
     if (seg->vaddr + seg->memsz < seg->vaddr) {
-        LOG_E("'%s' segment %llu address overflows", path,
-              (unsigned long long)idx);
+        LOG_E("'%s' segment %" PRIu64 " address overflows", path,
+              idx);
         return false;
     }
 
@@ -108,8 +108,8 @@ static bool prog_check_overlap(const char *path, const WstFile *file,
         prog_get_seg(file, hdr, j, &prev);
         if (seg->vaddr < prev.vaddr + prev.memsz &&
             prev.vaddr < seg->vaddr + seg->memsz) {
-            LOG_E("'%s' segments %llu and %llu overlap",
-                  path, (unsigned long long)j, (unsigned long long)idx);
+            LOG_E("'%s' segments %" PRIu64 " and %" PRIu64 " overlap",
+                  path, j, idx);
             return false;
         }
     }
@@ -139,8 +139,8 @@ static bool prog_check_segs(const char *path, const WstFile *file,
 
         if (seg.vaddr + seg.memsz > total) {
             if (seg.vaddr + seg.memsz > SIZE_MAX) {
-                LOG_E("'%s' segment %llu past size_t range",
-                      path, (unsigned long long)i);
+                LOG_E("'%s' segment %" PRIu64 " past size_t range",
+                      path, i);
                 return false;
             }
             total = (size_t)(seg.vaddr + seg.memsz);
@@ -197,7 +197,7 @@ bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
         memcpy(&mem->data[(size_t)seg.vaddr], file.data + (size_t)seg.offset,
                (size_t)seg.filesz);
     }
-    VEC_SEAL((WstVecVoid *)mem, sizeof(uint8_t));
+    wst_vec_u8_seal(mem);
 
     *entry_out = (size_t)hdr.entry;
 
@@ -206,7 +206,6 @@ bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
     return true;
 }
 
-/* Code goes at zero, data follows 8-aligned, matching the assembler. */
 #define PROG_DATA_ALIGN (8)
 
 size_t wst_prog_data_addr(size_t code_len)

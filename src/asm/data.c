@@ -3,10 +3,12 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* Assembly data section entries parsing of supported types. */
 
 static bool asm_data_push(AsmCtx *ctx, uint8_t byte, size_t lineno)
 {
@@ -140,7 +142,31 @@ static bool asm_data_str(AsmCtx *ctx, const char *val, size_t lineno)
     return true;
 }
 
-/* `name: <type> <value>` in `section .data`, address is the data offset. */
+/* Integer entry of `nbytes` bytes, aligned to its size. */
+static bool asm_data_int(AsmCtx *ctx, const char *type, const char *val,
+                         unsigned nbytes, size_t *off_out, size_t lineno)
+{
+    assert(ctx != NULL);
+    assert(type != NULL);
+    assert(val != NULL);
+    assert(off_out != NULL);
+
+    if (!asm_data_align(ctx, nbytes, lineno))
+        return false;
+
+    unsigned long long num = 0;
+    unsigned long long limit =
+        nbytes >= 8 ? ULLONG_MAX : ((1ULL << (8 * nbytes)) - 1);
+
+    if (!asm_data_num(val, &num) || num > limit) {
+        LOG_E("line %zu: bad %s value", lineno, type);
+        return false;
+    }
+
+    *off_out = ctx->obj->data.length;
+    return asm_data_bits(ctx, (uint64_t)num, nbytes, lineno);
+}
+
 bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
 {
     assert(ctx != NULL);
@@ -172,41 +198,32 @@ bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
     type[tlen] = '\0';
 
     size_t off = 0;
-    if (strcmp(type, "u64") == 0 || strcmp(type, "f64") == 0) {
-        if (!asm_data_align(ctx, 8, lineno))
-            return false;
-        off = ctx->obj->data.length;
-        uint64_t bits = 0;
-        if (type[0] == 'u') {
-            unsigned long long num = 0;
-            if (!asm_data_num(val, &num)) {
-                LOG_E("line %zu: bad u64 value", lineno);
-                return false;
-            }
-            bits = (uint64_t)num;
-        } else {
-            double num = 0;
-            if (!asm_data_double(val, &num)) {
-                LOG_E("line %zu: bad f64 value", lineno);
-                return false;
-            }
-            memcpy(&bits, &num, sizeof(bits));
-        }
-        if (!asm_data_bits(ctx, bits, 8, lineno))
+
+    if (strcmp(type, "u64") == 0) {
+        if (!asm_data_int(ctx, type, val, 8, &off, lineno))
             return false;
     } else if (strcmp(type, "u32") == 0) {
-        if (!asm_data_align(ctx, 4, lineno))
+        if (!asm_data_int(ctx, type, val, 4, &off, lineno))
             return false;
+    } else if (strcmp(type, "f64") == 0) {
+        if (!asm_data_align(ctx, 8, lineno))
+            return false;
+
         off = ctx->obj->data.length;
-        unsigned long long num = 0;
-        if (!asm_data_num(val, &num) || num > 0xFFFFFFFFu) {
-            LOG_E("line %zu: bad u32 value", lineno);
+
+        double num = 0;
+        if (!asm_data_double(val, &num)) {
+            LOG_E("line %zu: bad f64 value", lineno);
             return false;
         }
-        if (!asm_data_bits(ctx, (uint64_t)num, 4, lineno))
+
+        uint64_t bits = 0;
+        memcpy(&bits, &num, sizeof(bits));
+        if (!asm_data_bits(ctx, bits, 8, lineno))
             return false;
     } else if (strcmp(type, "str") == 0) {
         off = ctx->obj->data.length;
+
         if (!asm_data_str(ctx, val, lineno))
             return false;
     } else {

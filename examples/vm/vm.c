@@ -8,7 +8,7 @@
 
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
-/* Defaults matching WST_VM_MEM_DEFAULT_MAX / WST_VM_STACK_DEFAULT_SIZE. */
+/* Defaults matching WST_VM_MEM_DEFAULT_MAX, WST_VM_STACK_DEFAULT_SIZE. */
 #define VM_DEFAULT_MEM_MB 1024
 #define VM_DEFAULT_STACK_KB 64
 
@@ -99,7 +99,7 @@ int main(int argc, char **argv)
         stack_kb = VM_DEFAULT_STACK_KB;
 
     ctx.mem_max = (size_t)mem_mb * 1024 * 1024;
-    ctx.stack_size = (size_t)stack_kb * 1024;
+    ctx.stack.size = (size_t)stack_kb * 1024;
 
     if (!wst_vm_init(&vm))
         return EXIT_FAILURE;
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
     if (!wst_vm_context_load(&ctx, prog_path))
         return EXIT_FAILURE;
     vm.pc = ctx.entry;
-    vm.regs[WST_VM_REG_SP] = (uint64_t)ctx.stack_top;
+    vm.regs[WST_VM_REG_SP] = (uint64_t)ctx.stack.top;
 
     WstVmInstr instr = { 0 };
     while (1) {
