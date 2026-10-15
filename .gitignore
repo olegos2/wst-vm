@@ -4,3 +4,5 @@
 /docs
 .gdb_history
 *.swp
+/subprojects/wst-toys/
+/subprojects/packagecache/

@@ -132,6 +132,7 @@ static bool asm_split_ops(char *args, char *toks[3], size_t *ntoks_out,
     while (alen > 0 && asm_is_ws(args[alen - 1]))
         alen--;
     args[alen] = '\0';
+
     if (alen > 0 && args[alen - 1] == ',') {
         LOG_E("line %zu: trailing comma", lineno);
         return false;
@@ -143,20 +144,25 @@ static bool asm_split_ops(char *args, char *toks[3], size_t *ntoks_out,
         p = (char *)asm_skip_ws(p);
         if (*p == '\0')
             break;
+
         if (n == 3) {
             LOG_E("line %zu: too many operands", lineno);
             return false;
         }
+
         toks[n++] = p;
         while (*p != '\0' && *p != ',')
             p++;
+
         if (*p == ',') {
             *p = '\0';
             p++;
         }
+
         char *t = toks[n - 1] + strlen(toks[n - 1]);
         while (t > toks[n - 1] && asm_is_ws(t[-1]))
             *--t = '\0';
+
         if (toks[n - 1][0] == '\0') {
             LOG_E("line %zu: empty operand", lineno);
             return false;
@@ -178,9 +184,10 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
 
     *sym_out = NULL;
 
-    const char *mp = asm_skip_ws(line);
-    size_t mlen = strcspn(mp, " \t\r");
-    const WstVmInstrDesc *desc = asm_find_op_n(mp, mlen);
+    const char *mnemonic = asm_skip_ws(line);
+    size_t mnemonic_len = strcspn(mnemonic, " \t\r");
+
+    const WstVmInstrDesc *desc = asm_find_op_n(mnemonic, mnemonic_len);
     if (desc == NULL) {
         LOG_E("line %zu: unknown mnemonic", lineno);
         return false;
@@ -188,22 +195,26 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
 
     char *toks[3] = { NULL, NULL, NULL };
     size_t ntoks = 0;
-    if (!asm_split_ops((char *)mp + mlen, toks, &ntoks, lineno))
+    if (!asm_split_ops((char *)mnemonic + mnemonic_len, toks, &ntoks, lineno))
         return false;
 
     /* Operand bits ascend in assembly order: RD, RS1, RS2, IMM. */
     size_t need = 0;
     for (unsigned m = desc->operands; m != 0; m >>= 1)
         need += m & 1u;
+
     if (ntoks != need) {
         LOG_E("line %zu: '%s' needs %zu operands, got %zu",
               lineno, desc->mnemonic, need, ntoks);
         return false;
     }
 
-    unsigned rd = 0, rs1 = 0, rs2 = 0;
+    unsigned rd = 0;
+    unsigned rs1 = 0;
+    unsigned rs2 = 0;
     int64_t imm = 0;
     size_t ti = 0;
+
     for (unsigned slot = WST_VM_OPND_RD; slot <= WST_VM_OPND_IMM; slot <<= 1) {
         if ((desc->operands & slot) == 0)
             continue;
@@ -214,6 +225,7 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
             bool is_float = (desc->fregs & slot) != 0;
             unsigned *dst = slot == WST_VM_OPND_RD ? &rd :
                             slot == WST_VM_OPND_RS1 ? &rs1 : &rs2;
+
             if (!asm_parse_reg(tok, is_float, dst)) {
                 LOG_E("line %zu: bad %s register '%s'",
                       lineno, is_float ? "float" : "integer", tok);
@@ -238,10 +250,12 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                     lineno, tok);
             return false;
         }
+
         if (!asm_valid_name(tok + 1)) {
             LOG_E("line %zu: bad symbol name '%s'", lineno, tok);
             return false;
         }
+
         *sym_out = strdup(tok + 1);
         if (*sym_out == NULL) {
             LOG_E("line %zu: out of memory", lineno);

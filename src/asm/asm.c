@@ -223,6 +223,7 @@ static bool asm_resolve(AsmCtx *ctx)
     assert(ctx != NULL);
 
     size_t data_base = wst_prog_data_addr(ctx->obj->code.length * 4);
+    
     for (size_t i = 0; i < ctx->fixups.length; i++) {
         const AsmFixup *fix = &ctx->fixups.data[i];
         const AsmSym *sym = asm_sym_find(ctx, fix->name);
@@ -244,6 +245,7 @@ static bool asm_resolve(AsmCtx *ctx)
         if (!asm_patch_word(ctx, fix, target))
             return false;
     }
+
     return true;
 }
 
@@ -263,6 +265,7 @@ bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out)
     uint32_t word = 0;
     char *sym = NULL;
     WstVmInstrFormat fmt = WST_VM_INSTR_FORMAT_INVALID;
+
     bool ok = asm_parse_instr(tmp, lineno, false, &word, &sym, &fmt);
     free(sym);
     if (ok)
