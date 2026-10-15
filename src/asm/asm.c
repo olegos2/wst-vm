@@ -15,7 +15,7 @@ void wst_vm_asm_object_free(WstAsmObject *obj)
     if (obj == NULL)
         return;
 
-    WstVecErr err_code = wst_vec_u8_free(&obj->code);
+    WstVecErr err_code = wst_vec_u32_free(&obj->code);
     WstVecErr err_data = wst_vec_u8_free(&obj->data);
 
     if (err_code != WST_VEC_NO_ERR || err_data != WST_VEC_NO_ERR)
@@ -49,11 +49,11 @@ static bool asm_section(AsmCtx *ctx, const char *line, size_t lineno)
 
     const char *name = asm_skip_ws(line + strlen("section"));
     if (strcmp(name, ".text") == 0) {
-        ctx->in_data = false;
+        ctx->section = ASM_TEXT;
         return true;
     }
     if (strcmp(name, ".data") == 0) {
-        ctx->in_data = true;
+        ctx->section = ASM_DATA;
         return true;
     }
 
@@ -66,11 +66,7 @@ static bool asm_label(AsmCtx *ctx, const char *line, size_t lineno)
 {
     assert(ctx != NULL);
     assert(line != NULL);
-
-    if (ctx->in_data) {
-        LOG_E("line %zu: labels belong in section .text", lineno);
-        return false;
-    }
+    assert(ctx->section == ASM_TEXT);
 
     const char *name = line + 1;
     if (!asm_valid_name(name)) {
@@ -78,20 +74,16 @@ static bool asm_label(AsmCtx *ctx, const char *line, size_t lineno)
         return false;
     }
 
-    return asm_sym_add(ctx, name, ctx->obj->code.length, ASM_SYM_LABEL, lineno);
+    return asm_sym_add(ctx, name, ctx->obj->code.length * 4, ASM_SYM_LABEL, lineno);
 }
 
 static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
 {
     assert(ctx != NULL);
     assert(line != NULL);
+    assert(ctx->section == ASM_TEXT);
 
-    if (ctx->in_data) {
-        LOG_E("line %zu: instructions belong in section .text", lineno);
-        return false;
-    }
-
-    size_t off = ctx->obj->code.length;
+    size_t off = ctx->obj->code.length * 4;
     uint32_t word = 0;
     char *sym = NULL;
     WstVmInstrFormat fmt = WST_VM_INSTR_FORMAT_INVALID;
@@ -111,6 +103,24 @@ static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
     return true;
 }
 
+/* Handle one `.data` line, labels and code belong in `.text`. */
+static bool asm_data_line(AsmCtx *ctx, const char *line, size_t lineno)
+{
+    assert(ctx != NULL);
+    assert(line != NULL);
+    assert(ctx->section == ASM_DATA);
+
+    if (line[0] == ':') {
+        LOG_E("line %zu: labels belong in section .text", lineno);
+        return false;
+    }
+    if (strchr(line, ':') == NULL) {
+        LOG_E("line %zu: instructions belong in section .text", lineno);
+        return false;
+    }
+    return asm_data_entry(ctx, (char *)line, lineno);
+}
+
 static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
 {
     assert(ctx != NULL);
@@ -122,15 +132,10 @@ static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
 
     if (strncmp(p, "section", 7) == 0 && (p[7] == '\0' || asm_is_ws(p[7])))
         return asm_section(ctx, line, lineno);
+    if (ctx->section == ASM_DATA)
+        return asm_data_line(ctx, p, lineno);
     if (p[0] == ':')
         return asm_label(ctx, p, lineno);
-    if (ctx->in_data) {
-        if (strchr(p, ':') == NULL) {
-            LOG_E("line %zu: instructions belong in section .text", lineno);
-            return false;
-        }
-        return asm_data_entry(ctx, (char *)p, lineno);
-    }
 
     /* `name:` outside .data is a misplaced data entry, not an instr. */
     size_t nlen = 0;
@@ -159,8 +164,7 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
     if (!asm_check_imm(fix->fmt, imm, fix->lineno))
         return false;
 
-    uint32_t word = 0;
-    memcpy(&word, &ctx->obj->code.data[fix->off], sizeof(word));
+    uint32_t word = wst_vec_u32_get(&ctx->obj->code, fix->off / 4);
     switch (fix->fmt) {
     case WST_VM_INSTR_FORMAT_I:
     case WST_VM_INSTR_FORMAT_S:
@@ -177,7 +181,10 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
         LOG_E("line %zu: bad fixup format", fix->lineno);
         return false;
     }
-    memcpy(&ctx->obj->code.data[fix->off], &word, sizeof(word));
+    if (wst_vec_u32_set(&ctx->obj->code, fix->off / 4, word) != WST_VEC_NO_ERR) {
+        LOG_E("line %zu: address space damaged", fix->lineno);
+        return false;
+    }
     return true;
 }
 
@@ -186,9 +193,9 @@ static bool asm_resolve(AsmCtx *ctx)
 {
     assert(ctx != NULL);
 
-    size_t data_base = wst_prog_data_addr(ctx->obj->code.length);
-    for (size_t i = 0; i < ctx->fixups.len; i++) {
-        const AsmFixup *fix = &ctx->fixups.items[i];
+    size_t data_base = wst_prog_data_addr(ctx->obj->code.length * 4);
+    for (size_t i = 0; i < ctx->fixups.length; i++) {
+        const AsmFixup *fix = &ctx->fixups.data[i];
         const AsmSym *sym = asm_sym_find(ctx, fix->name);
         if (sym == NULL) {
             LOG_E("line %zu: unknown symbol '%s'", fix->lineno, fix->name);
@@ -208,7 +215,6 @@ static bool asm_resolve(AsmCtx *ctx)
         if (!asm_patch_word(ctx, fix, target))
             return false;
     }
-    wst_vec_u8_seal(&ctx->obj->code);
     return true;
 }
 
@@ -242,7 +248,7 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
     assert(src != NULL);
     assert(out != NULL);
 
-    wst_vec_u8_free(&out->code);
+    wst_vec_u32_free(&out->code);
     wst_vec_u8_free(&out->data);
 
     char *copy = calloc(1, len + 1);
@@ -255,7 +261,7 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
 
     AsmCtx ctx = {
         .obj = out,
-        .in_data = false,
+        .section = ASM_TEXT,
     };
 
     bool ok = true;
@@ -284,7 +290,7 @@ bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out)
     free(copy);
 
     if (!ok) {
-        wst_vec_u8_free(&out->code);
+        wst_vec_u32_free(&out->code);
         wst_vec_u8_free(&out->data);
     }
     return ok;

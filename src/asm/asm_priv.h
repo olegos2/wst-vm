@@ -10,13 +10,19 @@
 #include <stdint.h>
 
 
+/** Assembly section, selects the line handler. */
+typedef enum {
+    ASM_TEXT = 0,
+    ASM_DATA,
+} AsmSection;
+
 /** Type of symbol in assembly. */
 typedef enum {
     ASM_SYM_LABEL,
     ASM_SYM_DATA,
 } AsmSymType;
 
-/** Named address, code labels hold bytes, data names hold offsets. */
+/** Named code address or data offset. */
 typedef struct {
     char *name;
     size_t addr;
@@ -31,24 +37,31 @@ typedef struct {
     size_t lineno;
 } AsmFixup;
 
-typedef struct {
-    AsmSym *items;
-    size_t len;
-    size_t cap;
-} AsmSyms;
+/* Stamped tables, decls everywhere, impls only where ASM_TYPES_IMPL is used. */
+#ifdef ASM_TYPES_IMPL
+#define VEC_IMPL
+#endif
+#define VEC_ELEM AsmSym
+#define VEC_T AsmSymVec
+#define VEC_F(name) asm_symvec_ ## name
+#define VEC_REF
+#include "toys/vec_internal.h"
 
-typedef struct {
-    AsmFixup *items;
-    size_t len;
-    size_t cap;
-} AsmFixups;
+#define VEC_ELEM AsmFixup
+#define VEC_T AsmFixupVec
+#define VEC_F(name) asm_fixupvec_ ## name
+#define VEC_REF
+#include "toys/vec_internal.h"
+#ifdef ASM_TYPES_IMPL
+#undef VEC_IMPL
+#endif
 
 /** First-pass state, output buffers, symbol table, fixup list, section. */
 typedef struct {
     WstAsmObject *obj;
-    AsmSyms syms;
-    AsmFixups fixups;
-    bool in_data;
+    AsmSymVec syms;
+    AsmFixupVec fixups;
+    AsmSection section;
 } AsmCtx;
 
 
@@ -94,7 +107,7 @@ const AsmSym *asm_sym_find(const AsmCtx *ctx, const char *name);
 bool asm_sym_add(AsmCtx *ctx, const char *name, size_t addr,
                  AsmSymType type, size_t lineno);
 
-/** Record an unresolved `:name` use for the second pass. */
+/** Record one `:name` use to patch later. */
 bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
                  const char *name, size_t lineno);
 
@@ -102,18 +115,17 @@ bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
 void asm_tables_free(AsmCtx *ctx);
 
 /*
- * Encode one instruction, `line` holds `mnemonic operands...` already
- * stripped of comments. Numeric operands encode inline, a `:name`
- * immediate needs `allow_sym` and comes back in `sym_out`.
+ * Encode one `mnemonic operands...` line with comments stripped.
+ * A `:name` operand comes back in `sym_out`, free it after use.
  */
 bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                      uint32_t *word_out, char **sym_out,
                      WstVmInstrFormat *fmt_out);
 
-/** Append a word (instruction) to the code buffer, little-endian. */
+/** Append a word to the code buffer, little-endian. */
 bool asm_emit_word(AsmCtx *ctx, uint32_t word, size_t lineno);
 
-/** Range check an immediate for its format. */
+/** Reject an immediate too wide for its format. */
 bool asm_check_imm(WstVmInstrFormat fmt, int64_t imm, size_t lineno);
 
 /** Patch the imm field of an encoded word. */

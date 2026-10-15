@@ -20,6 +20,7 @@
 #define ASM_U_MAX ((int64_t)0xfffff000)
 
 
+/* Find an opcode by name of known length. */
 static const WstVmInstrDesc *asm_find_op_n(const char *name, size_t n)
 {
     assert(name != NULL);
@@ -35,7 +36,7 @@ static const WstVmInstrDesc *asm_find_op_n(const char *name, size_t n)
     return NULL;
 }
 
-/* Opcode byte back from a table row pointer. */
+/* Opcode byte of a table row. */
 static unsigned asm_opcode(const WstVmInstrDesc *desc)
 {
     assert(desc != NULL);
@@ -86,7 +87,7 @@ uint32_t asm_set_imm20(uint32_t word, int64_t imm)
     return (word & 0xFFFu) | ((uint32_t)hi << 12);
 }
 
-/* `xN` or `fN` with `N` in 0..7, file picked by the operand slot. */
+/* Parse one register token, `x0`-`x7` or `f0`-`f7`. */
 static bool asm_parse_reg(const char *tok, bool is_float, unsigned *reg_out)
 {
     assert(tok != NULL);
@@ -208,7 +209,7 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
             continue;
 
         const char *tok = toks[ti++];
-        
+
         if (slot != WST_VM_OPND_IMM) {
             bool is_float = (desc->fregs & slot) != 0;
             unsigned *dst = slot == WST_VM_OPND_RD ? &rd :
@@ -287,11 +288,9 @@ bool asm_emit_word(AsmCtx *ctx, uint32_t word, size_t lineno)
 {
     assert(ctx != NULL);
 
-    for (size_t i = 0; i < 4; i++) {
-        if (wst_vec_u8_push(&ctx->obj->code, (uint8_t)((word >> (8 * i)) & 0xFFu)) != WST_VEC_NO_ERR) {
-            LOG_E("line %zu: out of memory", lineno);
-            return false;
-        }
+    if (wst_vec_u32_push(&ctx->obj->code, word) != WST_VEC_NO_ERR) {
+        LOG_E("line %zu: out of memory", lineno);
+        return false;
     }
     return true;
 }

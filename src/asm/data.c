@@ -8,8 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Assembly data section entries parsing of supported types. */
+/* Data section entries. */
 
+/* Append one byte to the data buffer. */
 static bool asm_data_push(AsmCtx *ctx, uint8_t byte, size_t lineno)
 {
     assert(ctx != NULL);
@@ -21,6 +22,7 @@ static bool asm_data_push(AsmCtx *ctx, uint8_t byte, size_t lineno)
     return true;
 }
 
+/* Pad the data buffer with zeros to alignment. */
 static bool asm_data_align(AsmCtx *ctx, size_t align, size_t lineno)
 {
     assert(ctx != NULL);
@@ -32,7 +34,7 @@ static bool asm_data_align(AsmCtx *ctx, size_t align, size_t lineno)
     return true;
 }
 
-/* Write `bits` little-endian, used by u64/u32 entries. */
+/* Append an integer little-endian. */
 static bool asm_data_bits(AsmCtx *ctx, uint64_t bits, unsigned nbytes,
                           size_t lineno)
 {
@@ -46,7 +48,7 @@ static bool asm_data_bits(AsmCtx *ctx, uint64_t bits, unsigned nbytes,
     return true;
 }
 
-/* Unsigned number, no trailing garbage, `-` rejected up front. */
+/* Parse an unsigned number with no trailing garbage. */
 static bool asm_data_num(const char *tok, unsigned long long *num_out)
 {
     assert(tok != NULL);
@@ -68,6 +70,7 @@ static bool asm_data_num(const char *tok, unsigned long long *num_out)
     return true;
 }
 
+/* Parse a double with no trailing garbage. */
 static bool asm_data_double(const char *tok, double *num_out)
 {
     assert(tok != NULL);
@@ -180,36 +183,41 @@ bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
     *colon = '\0';
 
     char *name = (char *)asm_skip_ws(line);
-    char *nend = name + strlen(name);
-    while (nend > name && asm_is_ws(nend[-1]))
-        *--nend = '\0';
+    char *name_end = name + strlen(name);
+
+    while (name_end > name && asm_is_ws(name_end[-1]))
+        *--name_end = '\0';
+
     if (!asm_valid_name(name)) {
         LOG_E("line %zu: bad data name", lineno);
         return false;
     }
 
     char *type = (char *)asm_skip_ws(colon + 1);
-    size_t tlen = strcspn(type, " \t\r");
-    char *val = (char *)asm_skip_ws(type + tlen);
-    if (tlen == 0 || *val == '\0') {
+    size_t type_len = strcspn(type, " \t\r");
+
+    char *val = (char *)asm_skip_ws(type + type_len);
+    if (type_len == 0 || *val == '\0') {
         LOG_E("line %zu: data entry needs '<type> <value>'", lineno);
         return false;
     }
-    type[tlen] = '\0';
+    type[type_len] = '\0';
 
-    size_t off = 0;
+    size_t offset = 0;
 
     if (strcmp(type, "u64") == 0) {
-        if (!asm_data_int(ctx, type, val, 8, &off, lineno))
+        if (!asm_data_int(ctx, type, val, 8, &offset, lineno))
             return false;
-    } else if (strcmp(type, "u32") == 0) {
-        if (!asm_data_int(ctx, type, val, 4, &off, lineno))
+    }
+    else if (strcmp(type, "u32") == 0) {
+        if (!asm_data_int(ctx, type, val, 4, &offset, lineno))
             return false;
-    } else if (strcmp(type, "f64") == 0) {
+    }
+    else if (strcmp(type, "f64") == 0) {
         if (!asm_data_align(ctx, 8, lineno))
             return false;
 
-        off = ctx->obj->data.length;
+        offset = ctx->obj->data.length;
 
         double num = 0;
         if (!asm_data_double(val, &num)) {
@@ -221,16 +229,18 @@ bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
         memcpy(&bits, &num, sizeof(bits));
         if (!asm_data_bits(ctx, bits, 8, lineno))
             return false;
-    } else if (strcmp(type, "str") == 0) {
-        off = ctx->obj->data.length;
+    }
+    else if (strcmp(type, "str") == 0) {
+        offset = ctx->obj->data.length;
 
         if (!asm_data_str(ctx, val, lineno))
             return false;
-    } else {
+    }
+    else {
         LOG_E("line %zu: unknown data type '%s' (u64, u32, f64, str)",
               lineno, type);
         return false;
     }
 
-    return asm_sym_add(ctx, name, off, ASM_SYM_DATA, lineno);
+    return asm_sym_add(ctx, name, offset, ASM_SYM_DATA, lineno);
 }

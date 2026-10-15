@@ -8,12 +8,12 @@
 #include <stdint.h>
 
 /**
- * Assembled program before linking with code and data blob.
+ * Assembled program before linking, code words plus data bytes.
  * Data addresses are data segment relative in code.
  * `wst_prog_save` links the two into a program file.
  */
 typedef struct {
-    WstVecU8 code;
+    WstVecU32 code;
     WstVecU8 data;
 } WstAsmObject;
 

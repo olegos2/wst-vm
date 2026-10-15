@@ -357,7 +357,7 @@ void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t num = (uint64_t)ins->imm;
 
-    /* Like opcodes: out-of-range numbers fall out, NULL entries are unknown. */
+    /* out-of-range numbers fall out, NULL entries are unknown. */
     WstVmSyscallHandler handler =
         num < WST_VM_SYSCALL_COUNT ? vm_syscalls[(size_t)num] : NULL;
     if (handler == NULL) {

@@ -32,8 +32,9 @@ static int run_asm(const char *in_path, const char *out_path)
     }
     wst_file_close(&src);
 
-    bool ok = wst_prog_save(out_path, obj.code.data, obj.code.length,
-                            obj.data.data, obj.data.length, 0);
+    bool ok = wst_prog_save(out_path, (const uint8_t *)obj.code.data,
+                            obj.code.length * 4, obj.data.data,
+                            obj.data.length, 0);
     wst_vm_asm_object_free(&obj);
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

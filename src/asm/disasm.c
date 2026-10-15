@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 
-/* Register name into `buf`, `xN` or `fN` by the operand slot. */
+/* Write one register name, `xN` or `fN`. */
 static bool dis_reg(unsigned operands, unsigned slot, unsigned reg,
                     char *buf, size_t cap, size_t *len_inout)
 {
@@ -31,6 +31,7 @@ static bool dis_reg(unsigned operands, unsigned slot, unsigned reg,
     return true;
 }
 
+/* Append text to the output buffer. */
 static bool dis_put(const char *text, char *buf, size_t cap, size_t *len_inout)
 {
     assert(text != NULL);
@@ -45,6 +46,7 @@ static bool dis_put(const char *text, char *buf, size_t cap, size_t *len_inout)
     return true;
 }
 
+/* Append a signed decimal number. */
 static bool dis_imm(int64_t imm, char *buf, size_t cap, size_t *len_inout)
 {
     assert(buf != NULL);
@@ -58,7 +60,7 @@ static bool dis_imm(int64_t imm, char *buf, size_t cap, size_t *len_inout)
     return true;
 }
 
-/* Same math as the interpreter sign extension, kept local. */
+/* Sign-extend a bit field. */
 static int64_t dis_sign_ext(uint32_t field, unsigned bits)
 {
     assert(bits > 0 && bits <= 32);
