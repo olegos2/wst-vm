@@ -7,6 +7,27 @@
 #include <stdint.h>
 
 
+/* Raw register aliases, need `vm` in scope. No x0 handling here,
+ * decoded operands go through VM_REG_READ/WRITE, these are for
+ * fixed roles: stack pointer and ecall args. */
+#define R_x0 (vm->regs[0])
+#define R_x1 (vm->regs[1])
+#define R_x2 (vm->regs[2])
+#define R_x3 (vm->regs[3])
+#define R_x4 (vm->regs[4])
+#define R_x5 (vm->regs[5])
+#define R_x6 (vm->regs[6])
+#define R_x7 (vm->regs[7])
+#define R_SP R_x7
+
+/* ecall convention: number in x1, args in x2-x4, result in x1. */
+#define ECALL_NUM R_x1
+#define ECALL_ARG0 R_x2
+#define ECALL_ARG1 R_x3
+#define ECALL_ARG2 R_x4
+#define ECALL_RET R_x1
+
+
 /** Read guest memory, one accessor per operand size. */
 uint64_t vm_mem_read64(WstVmContext *ctx, uint64_t addr);
 uint32_t vm_mem_read32(WstVmContext *ctx, uint64_t addr);
@@ -61,7 +82,6 @@ OP(fsub);
 OP(fmul);
 OP(fdiv);
 OP(fsqrt);
-OP(fpow);
 OP(feq);
 OP(flt);
 OP(fle);

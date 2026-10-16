@@ -42,14 +42,14 @@ typedef struct {
 #define VEC_IMPL
 #endif
 #define VEC_ELEM AsmSym
-#define VEC_T AsmSymVec
-#define VEC_F(name) asm_symvec_ ## name
+#define VEC_T WstVecSym
+#define VEC_F(name) wst_vec_sym_ ## name
 #define VEC_REF
 #include "toys/vec_internal.h"
 
 #define VEC_ELEM AsmFixup
-#define VEC_T AsmFixupVec
-#define VEC_F(name) asm_fixupvec_ ## name
+#define VEC_T WstVecFixup
+#define VEC_F(name) wst_vec_fixup_ ## name
 #define VEC_REF
 #include "toys/vec_internal.h"
 #ifdef ASM_TYPES_IMPL
@@ -59,8 +59,8 @@ typedef struct {
 /** First-pass state, output buffers, symbol table, fixup list, section. */
 typedef struct {
     WstAsmObject *obj;
-    AsmSymVec syms;
-    AsmFixupVec fixups;
+    WstVecSym syms;
+    WstVecFixup fixups;
     AsmSection section;
 } AsmCtx;
 
@@ -100,8 +100,8 @@ static inline bool asm_valid_name(const char *name)
 }
 
 
-/** Look up a symbol by exact name, NULL when missing. */
-const AsmSym *asm_sym_find(const AsmCtx *ctx, const char *name);
+/** Look up a symbol by exact name, copy into `out`, false when missing. */
+bool asm_sym_find(const AsmCtx *ctx, const char *name, AsmSym *out);
 
 /** Record a label or data name, false on duplicates. */
 bool asm_sym_add(AsmCtx *ctx, const char *name, size_t addr,

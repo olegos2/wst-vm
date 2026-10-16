@@ -17,8 +17,9 @@ rules. Hardware already turns bad input into `inf` and `nan`.
 `pc` is a byte offset into the address space. It must stay aligned to 4.
 Odd targets trap instead of running garbage.
 
-`x2` is the stack pointer by convention (RISC-V `sp`). It grows down
-inside the stack range, see [Memory](#memory). Plain `ld`/`st` with `x2`
+`x0` is zero, `x1`-`x4` take params with the return value in `x1`,
+`x5`-`x6` are callee-saved, `x7` is the stack pointer. It grows down
+inside the stack range, see [Memory](#memory). Plain `ld`/`st` with `x7`
 as base give direct stack access with offsets.
 
 ## Instruction word
@@ -97,11 +98,10 @@ All integer arithmetic wraps modulo 2^64.
 | `0x21` | `fmul`   | R      | `rd`  `rs1` `rs2` | `F[rd] ← F[rs1]*F[rs2]` | float multiply |
 | `0x22` | `fdiv`   | R      | `rd`  `rs1` `rs2` | `F[rd] ← F[rs1]/F[rs2]` | float divide |
 | `0x23` | `fsqrt`  | R      | `rd`  `rs1`       | `F[rd] ← sqrt(F[rs1])` | float square root |
-| `0x24` | `fpow`   | R      | `rd`  `rs1` `rs2` | `F[rd] ← pow(F[rs1],F[rs2])` | float power |
 | `0x25` | `feq`    | R      | `rd`  `rs1` `rs2` | `R[rd] ← (F[rs1]==F[rs2])?1:0`, NaN never equals | float compare equal |
 | `0x26` | `flt`    | R      | `rd`  `rs1` `rs2` | `R[rd] ← (F[rs1]<F[rs2])?1:0` | float compare less than |
 | `0x27` | `fle`    | R      | `rd`  `rs1` `rs2` | `R[rd] ← (F[rs1]<=F[rs2])?1:0` | float compare less or equal |
-| `0x28` | `ecall`  | I      | `imm`             | `host(imm)`, see table below | environment call |
+| `0x28` | `ecall`  | R      |                   | `host(R[x1])`, see table below | environment call |
 | `0x29` | `call`   | J      | `imm`             | `STACK.push(PC+4); PC ← PC+imm` | call |
 | `0x2A` | `ret`    | R      |                   | `PC ← STACK.pop()`, trap on underflow/misalign | return |
 | `0x2B` | `ini`    | I      | `rd`              | `R[rd] ← parse_int(stdin_line)` | input integer |
@@ -151,13 +151,13 @@ absolute address.
 
 ## Host calls
 
-`ecall` carries its number in imm. Arguments are passed in registers
-`x1` to `x3`. The return value lands in register `x1`.
+`ecall` carries its number in `x1`. Arguments ride in registers
+`x2` to `x4`. The return value lands in register `x1`.
 
 | Number | Name    | Arguments    | Description |
 | ------:|:------- |:------------ | ----------- |
-|    `0` | `exit`  | code         | End the program with `code & 0xFF` |
-|    `1` | `write` | fd, buf, len | Write `len` bytes from `buf` to fd, return bytes written in `x1` |
+|    `0` | `exit`  | code in `x2` | End the program with `code & 0xFF` |
+|    `1` | `write` | fd `x2`, buf `x3`, len `x4` | Write `len` bytes from `buf` to fd, return bytes written in `x1` |
 
 Write only allows standard output (`1`) and standard error (`2`).
 Other file numbers are fatal. The address range must already be mapped,
@@ -174,13 +174,13 @@ changing programs work with no extra effort. There is no cache to flush
 since nothing runs natively.
 
 The stack is the top region of the same array, carved after the program
-image on load (`--stack-size` in KiB, default 64). `x2` points at the
+image on load (`--stack-size` in KiB, default 64). `x7` points at the
 first free slot above the top item and grows down in 8 byte steps.
 Overflow past the base, underflow past the top and misaligned `sp` are
 fatal. Pushes and pops are bounds-checked memory writes and reads, so
-stack slots are ordinary memory: `ld x3, x2, 0` peeks the top without
-popping, `ld x4, x2, 8` reads deeper. Negative offsets work because the
-address wraps modulo 2^64 (`R[x2]-8` for `-8`).
+stack slots are ordinary memory: `ld x3, x7, 0` peeks the top without
+popping, `ld x4, x7, 8` reads deeper. Negative offsets work because the
+address wraps modulo 2^64 (`R[x7]-8` for `-8`).
 
 RISC-V has no dedicated stack ops either: `sp` plus `ld`/`st`/`addi`
 is the convention there too. Our `pushqr`/`pushqv`/`popqr`/`popqv` plus
@@ -251,8 +251,8 @@ Doubles come from the data segment through `fld`. Source is
 ```
 section .text
 addi x1, x0, 2
-addi x2, x0, 3
-add  x3, x1, x2
+addi x5, x0, 3
+add  x3, x1, x5
 addi x4, x0, 4
 mul  x3, x3, x4
 outi x3

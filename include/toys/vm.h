@@ -21,10 +21,11 @@
 #define WST_VM_STACK_DEFAULT_SIZE ((size_t)64 * 1024)
 
 /**
- * Integer register holding the stack pointer, RISC-V `sp` convention.
- * `vm.regs[WST_VM_REG_SP]` grows down inside `[stack_base, stack_top]`.
+ * Stack pointer register. Roles: `x0` is zero, `x1`-`x4` take params
+ * with the return value in `x1`, `x5`-`x6` are callee-saved.
+ * `vm.regs[WST_VM_REG_SP]` grows down inside the `WstVmStack` range.
  */
-#define WST_VM_REG_SP (2)
+#define WST_VM_REG_SP (7)
 
 #define WST_VM_OPCODE_BITS (7)
 #define WST_VM_OPCODE_COUNT (1u << WST_VM_OPCODE_BITS)
@@ -69,11 +70,11 @@ typedef enum {
     WST_VM_FMUL     = 0x21,
     WST_VM_FDIV     = 0x22, 
     WST_VM_FSQRT    = 0x23,
-    WST_VM_FPOW     = 0x24,
+    /* 0x24 retired, `pow` is not implemented in hardware. */
     WST_VM_FEQ      = 0x25, /* FP compare equal, 0/1 stored into GPR */
     WST_VM_FLT      = 0x26, /* FP compare less than, 0/1 stored into GPR */
     WST_VM_FLE      = 0x27, /* FP compare less then equal, 0/1 stored into GPR */
-    WST_VM_ECALL    = 0x28, /* host call by number in imm */
+    WST_VM_ECALL    = 0x28, /* host call by number in x1 */
     WST_VM_CALL     = 0x29, /* push pc+4 on stack, jump */
     WST_VM_RET      = 0x2A, /* pop pc from stack */
     WST_VM_INI      = 0x2B, /* read decimal integer from stdin into GPR */
@@ -81,11 +82,11 @@ typedef enum {
 } WstVmOp;
 
 /**
- * Host calls for `ecall`, number goes in imm.
+ * Host calls for `ecall`, number goes in `x1`.
  */
 typedef enum {
-    WST_VM_SYS_EXIT = 0,    /* exit with code from regs[1] */
-    WST_VM_SYS_WRITE = 1,   /* write regs[3] bytes from regs[2] to fd regs[1] */
+    WST_VM_SYS_EXIT = 0,    /* exit with code from x2 */
+    WST_VM_SYS_WRITE = 1,   /* write x4 bytes from x3 to fd x2, count back in x1 */
 } WstVmSyscall;
 
 /**
@@ -155,7 +156,7 @@ typedef struct WstVm {
  * `base`/`top` are outputs set by `wst_vm_context_load`.
  *
  * The range lives in shared memory so stack slots stay directly
- * addressable (`ld`/`st` with `x2`), the pointer itself is per-thread
+ * addressable (`ld`/`st` with `x7`), the pointer itself is per-thread
  * state in `WstVm.regs[WST_VM_REG_SP]`.
  */
 typedef struct {

@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/olegos2/wst-toys.git
-revision = 44f1d87aac51548a3bcd89c4eb27e010e8dafc84
+revision = 346541257807294559177f3808b6fe917f9677c3
 depth = 1
 
 [provide]

@@ -162,10 +162,6 @@ const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT] = {
                           WST_VM_OPND_RD  | WST_VM_OPND_RS1,
                           WST_VM_OPND_RD  | WST_VM_OPND_RS1, vm_exec_fsqrt },
 
-    [WST_VM_FPOW]     = { "fpow",     WST_VM_INSTR_FORMAT_R,
-                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
-                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fpow },
-
     [WST_VM_FEQ]      = { "feq",      WST_VM_INSTR_FORMAT_R,
                           WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
                           WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_feq },
@@ -178,8 +174,8 @@ const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT] = {
                           WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
                           WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fle },
 
-    [WST_VM_ECALL]    = { "ecall",    WST_VM_INSTR_FORMAT_I,
-                          WST_VM_OPND_IMM,
+    [WST_VM_ECALL]    = { "ecall",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_NONE,
                           WST_VM_OPND_NONE, vm_exec_ecall },
 
     [WST_VM_CALL]     = { "call",     WST_VM_INSTR_FORMAT_J,

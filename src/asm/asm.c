@@ -204,16 +204,16 @@ static bool asm_entry(AsmCtx *ctx)
 {
     assert(ctx != NULL);
 
-    const AsmSym *start = asm_sym_find(ctx, "_start");
-    if (start == NULL)
+    AsmSym start;
+    if (!asm_sym_find(ctx, "_start", &start))
         return true;
 
-    if (start->type != ASM_SYM_LABEL) {
+    if (start.type != ASM_SYM_LABEL) {
         LOG_E("entry `_start` must be a code label");
         return false;
     }
 
-    ctx->obj->entry = start->addr;
+    ctx->obj->entry = start.addr;
     return true;
 }
 
@@ -223,26 +223,27 @@ static bool asm_resolve(AsmCtx *ctx)
     assert(ctx != NULL);
 
     size_t data_base = wst_prog_data_addr(ctx->obj->code.length * 4);
-    
+
     for (size_t i = 0; i < ctx->fixups.length; i++) {
-        const AsmFixup *fix = &ctx->fixups.data[i];
-        const AsmSym *sym = asm_sym_find(ctx, fix->name);
-        if (sym == NULL) {
-            LOG_E("line %zu: unknown symbol '%s'", fix->lineno, fix->name);
+        AsmFixup fix;
+        wst_vec_fixup_get(&ctx->fixups, i, &fix);
+        AsmSym sym;
+        if (!asm_sym_find(ctx, fix.name, &sym)) {
+            LOG_E("line %zu: unknown symbol '%s'", fix.lineno, fix.name);
             return false;
         }
 
-        size_t target = sym->addr;
-        if (sym->type == ASM_SYM_DATA) {
+        size_t target = sym.addr;
+        if (sym.type == ASM_SYM_DATA) {
             if (target > SIZE_MAX - data_base) {
                 LOG_E("line %zu: symbol '%s' address overflows",
-                      fix->lineno, fix->name);
+                      fix.lineno, fix.name);
                 return false;
             }
             target = data_base + target;
         }
 
-        if (!asm_patch_word(ctx, fix, target))
+        if (!asm_patch_word(ctx, &fix, target))
             return false;
     }
 

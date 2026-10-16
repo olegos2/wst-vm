@@ -316,12 +316,6 @@ void vm_exec_fsqrt(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     vm->fp[ins->rd] = sqrt(vm->fp[ins->rs1]);
 }
 
-void vm_exec_fpow(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
-{
-    (void)ctx;
-    vm->fp[ins->rd] = pow(vm->fp[ins->rs1], vm->fp[ins->rs2]);
-}
-
 VM_DEF_FP_CMP(feq, vm_fp_eq(lhs, rhs))
 VM_DEF_FP_CMP(flt, lhs < rhs)
 VM_DEF_FP_CMP(fle, lhs <= rhs)
@@ -330,14 +324,14 @@ void vm_sys_exit(WstVm *vm, WstVmContext *ctx, size_t addr)
 {
     (void)ctx;
     (void)addr;
-    exit((int)(vm->regs[1] & 0xFFu));
+    exit((int)(ECALL_ARG0 & 0xFFu));
 }
 
 void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
 {
-    uint64_t fd = vm->regs[1];
-    uint64_t buf = vm->regs[2];
-    uint64_t len = vm->regs[3];
+    uint64_t fd = ECALL_ARG0;
+    uint64_t buf = ECALL_ARG1;
+    uint64_t len = ECALL_ARG2;
 
     if (fd != 1 && fd != 2) {
         LOG_E("ecall write to fd %" PRIu64 " at pc %zu", fd, addr);
@@ -349,13 +343,16 @@ void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
         exit(EXIT_FAILURE);
     }
 
+    /* Flush our own buffered output first, or `write` leapfrogs it. */
+    fflush(stdout);
+
     ssize_t done = write((int)fd, &ctx->mem.data[(size_t)buf], (size_t)len);
-    VM_REG_WRITE(vm, 1, (uint64_t)done);
+    ECALL_RET = (uint64_t)done;
 }
 
 void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t num = (uint64_t)ins->imm;
+    uint64_t num = ECALL_NUM;
 
     /* out-of-range numbers fall out, NULL entries are unknown. */
     WstVmSyscallHandler handler =

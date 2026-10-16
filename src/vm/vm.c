@@ -72,7 +72,7 @@ VM_DEF_MEM_RW(32)
 
 void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
 {
-    uint64_t sp = vm->regs[WST_VM_REG_SP];
+    uint64_t sp = R_SP;
 
     if (sp % 8 != 0) {
         LOG_E("misaligned sp %" PRIu64 " at pc %zu", sp, pc);
@@ -83,13 +83,13 @@ void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
         exit(EXIT_FAILURE);
     }
 
-    vm->regs[WST_VM_REG_SP] = sp - 8;
+    R_SP = sp - 8;
     vm_mem_write64(ctx, sp - 8, value);
 }
 
 uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
 {
-    uint64_t sp = vm->regs[WST_VM_REG_SP];
+    uint64_t sp = R_SP;
 
     if (sp % 8 != 0) {
         LOG_E("misaligned sp %" PRIu64 " at pc %zu", sp, pc);
@@ -100,7 +100,7 @@ uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
         exit(EXIT_FAILURE);
     }
 
-    vm->regs[WST_VM_REG_SP] = sp + 8;
+    R_SP = sp + 8;
     return vm_mem_read64(ctx, sp);
 }
 
