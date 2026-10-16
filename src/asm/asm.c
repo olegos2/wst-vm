@@ -162,17 +162,26 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
     assert(ctx != NULL);
     assert(fix != NULL);
 
+    uint32_t word = wst_vec_u32_get(&ctx->obj->code, fix->off / 4);
+
     int64_t imm = 0;
     if (fix->fmt == WST_VM_INSTR_FORMAT_B ||
-        fix->fmt == WST_VM_INSTR_FORMAT_J)
+        fix->fmt == WST_VM_INSTR_FORMAT_J) {
         imm = (int64_t)target - (int64_t)fix->off;
-    else
+    } else {
+        /* Memory immediates count in access-size units. */
+        unsigned scale = wst_vm_op_table[(unsigned)(word & 0x7Fu)].imm_scale;
+        if (target % scale != 0) {
+            LOG_E("line %zu: '%s' address not %u-aligned",
+                    fix->lineno, fix->name, scale);
+            return false;
+        }
+        target /= scale;
         imm = (int64_t)target;
+    }
 
     if (!asm_check_imm(fix->fmt, imm, fix->lineno))
         return false;
-
-    uint32_t word = wst_vec_u32_get(&ctx->obj->code, fix->off / 4);
 
     switch (fix->fmt) {
     case WST_VM_INSTR_FORMAT_I:

@@ -167,8 +167,8 @@ static bool prog_check_entry(const char *path, const WstProgHeader *hdr,
     return true;
 }
 
-bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
-                   size_t mem_max)
+bool wst_prog_load(uint8_t *mem, size_t mem_size, size_t *entry_out,
+                   const char *path)
 {
     assert(mem != NULL);
     assert(entry_out != NULL);
@@ -182,22 +182,21 @@ bool wst_prog_load(WstVecU8 *mem, size_t *entry_out, const char *path,
     size_t total_segs = 0;
 
     if (!prog_read_header(path, &file, &hdr) || 
-        !prog_check_segs(path, &file, &hdr, mem_max, &total_segs) ||
-        !prog_check_entry(path, &hdr, total_segs) ||
-        wst_vec_u8_resize(mem, total_segs) != WST_VEC_NO_ERR)
+        !prog_check_segs(path, &file, &hdr, mem_size, &total_segs) ||
+        !prog_check_entry(path, &hdr, total_segs))
     {
         wst_file_close(&file);
         return false;
     }
 
+    memset(mem, 0, total_segs);
     for (uint64_t i = 0; i < hdr.phnum; i++) {
         WstProgSegment seg = { 0 };
         prog_get_seg(&file, &hdr, i, &seg);
 
-        memcpy(&mem->data[(size_t)seg.vaddr], file.data + (size_t)seg.offset,
+        memcpy(&mem[(size_t)seg.vaddr], file.data + (size_t)seg.offset,
                (size_t)seg.filesz);
     }
-    wst_vec_u8_seal(mem);
 
     *entry_out = (size_t)hdr.entry;
 

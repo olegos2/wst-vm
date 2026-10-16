@@ -9,7 +9,7 @@
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
 /* Defaults matching WST_VM_MEM_DEFAULT_MAX, WST_VM_STACK_DEFAULT_SIZE. */
-#define VM_DEFAULT_MEM_MB 1024
+#define VM_DEFAULT_MEM_MB 256
 #define VM_DEFAULT_STACK_KB 64
 
 static WstVm vm;
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
             .type = ARG_INT,
             .dest = &mem_mb,
             .long_name = "--mem-max",
-            .description = "address space cap in MiB (default 1024)",
+            .description = "guest RAM in MiB (default 256)",
         },
         {
             .type = ARG_INT,

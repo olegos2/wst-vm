@@ -32,6 +32,17 @@
         VM_REG_WRITE(vm, ins->rd, (expr)); \
     }
 
+/* Integer op with immediate, `expr` sees `lhs`/`rhs` as uint64_t. */
+#define VM_DEF_R_INT_IMM(name, expr) \
+    void vm_exec_##name(WstVm *vm, WstVmContext *ctx, \
+                        const WstVmInstr *ins) \
+    { \
+        (void)ctx; \
+        uint64_t lhs = VM_REG_READ(vm, ins->rs1); \
+        uint64_t rhs = (uint64_t)ins->imm; \
+        VM_REG_WRITE(vm, ins->rd, (expr)); \
+    }
+
 /* Float R-type op, `expr` sees `lhs`/`rhs` as double. */
 #define VM_DEF_R_FP(name, expr) \
     void vm_exec_##name(WstVm *vm, WstVmContext *ctx, \
@@ -189,39 +200,39 @@ void vm_exec_inf(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 void vm_exec_ld(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
+    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 8u;
     VM_REG_WRITE(vm, ins->rd, vm_mem_read64(ctx, addr));
 }
 
 void vm_exec_lw(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
+    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 4u;
     uint32_t raw = vm_mem_read32(ctx, addr);
-    VM_REG_WRITE(vm, ins->rd, (uint64_t)(int64_t)(int32_t)raw);
+    VM_REG_WRITE(vm, ins->rd, (U(64))(S(64))(S(32))raw);
 }
 
 void vm_exec_st(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
+    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 8u;
     vm_mem_write64(ctx, addr, VM_REG_READ(vm, ins->rs2));
 }
 
 void vm_exec_sw(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
+    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 4u;
     vm_mem_write32(ctx, addr, (uint32_t)VM_REG_READ(vm, ins->rs2));
 }
 
 void vm_exec_fld(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
+    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 8u;
     uint64_t bits = vm_mem_read64(ctx, addr);
     memcpy(&vm->fp[ins->rd], &bits, sizeof(bits));
 }
 
 void vm_exec_fst(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm;
+    uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 8u;
     uint64_t bits = 0;
     memcpy(&bits, &vm->fp[ins->rs2], sizeof(bits));
     vm_mem_write64(ctx, addr, bits);
@@ -257,6 +268,18 @@ void vm_exec_jal(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     vm->pc = (size_t)((int64_t)ins->addr + ins->imm);
 }
 
+void vm_exec_jalr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+{
+    (void)ctx;
+    uint64_t target = (VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm) & ~(uint64_t)1u;
+    VM_REG_WRITE(vm, ins->rd, (uint64_t)(ins->addr + 4));
+    if (target % 4 != 0) {
+        LOG_E("misaligned jalr target %" PRIu64 " at pc %zu", target, ins->addr);
+        exit(EXIT_FAILURE);
+    }
+    vm->pc = (size_t)target;
+}
+
 VM_DEF_BRANCH(beq, lhs == rhs)
 VM_DEF_BRANCH(bne, lhs != rhs)
 VM_DEF_BRANCH(blt, lhs < rhs)
@@ -270,7 +293,9 @@ VM_DEF_R_INT(or, lhs | rhs)
 VM_DEF_R_INT(xor, lhs ^ rhs)
 VM_DEF_R_INT(sll, lhs << (rhs & 63u))
 VM_DEF_R_INT(srl, lhs >> (rhs & 63u))
-VM_DEF_R_INT(sra, (uint64_t)((int64_t)lhs >> (rhs & 63u)))
+VM_DEF_R_INT(sra, (U(64))((S(64))lhs >> (rhs & 63u)))
+VM_DEF_R_INT(divu, rhs == 0 ? ~(uint64_t)0 : lhs / rhs)
+VM_DEF_R_INT(remu, rhs == 0 ? lhs : lhs % rhs)
 
 void vm_exec_div(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
@@ -282,7 +307,7 @@ void vm_exec_div(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     VM_REG_WRITE(vm, ins->rd, quot);
 }
 
-void vm_exec_mod(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+void vm_exec_rem(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     (void)ctx;
     uint64_t lhs = VM_REG_READ(vm, ins->rs1);
@@ -304,6 +329,21 @@ void vm_exec_lui(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     (void)ctx;
     VM_REG_WRITE(vm, ins->rd, (uint64_t)ins->imm);
 }
+
+void vm_exec_auipc(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+{
+    (void)ctx;
+    VM_REG_WRITE(vm, ins->rd, (uint64_t)ins->addr + (uint64_t)ins->imm);
+}
+
+VM_DEF_R_INT_IMM(andi, lhs & rhs)
+VM_DEF_R_INT_IMM(ori, lhs | rhs)
+VM_DEF_R_INT_IMM(xori, lhs ^ rhs)
+VM_DEF_R_INT_IMM(slli, lhs << (rhs & 63u))
+VM_DEF_R_INT_IMM(srli, lhs >> (rhs & 63u))
+VM_DEF_R_INT_IMM(srai, (U(64))((S(64))lhs >> (rhs & 63u)))
+VM_DEF_R_INT_IMM(slti, ((S(64))lhs < (S(64))rhs) ? 1u : 0u)
+VM_DEF_R_INT_IMM(sltiu, (lhs < rhs) ? 1u : 0u)
 
 VM_DEF_R_FP(fadd, lhs + rhs)
 VM_DEF_R_FP(fsub, lhs - rhs)
@@ -338,7 +378,7 @@ void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
         exit(EXIT_FAILURE);
     }
 
-    if (len > ctx->mem.length || buf > ctx->mem.length - len) {
+    if (len > ctx->mem_size || buf > ctx->mem_size - len) {
         LOG_E("ecall write past address space end at pc %zu", addr);
         exit(EXIT_FAILURE);
     }
@@ -346,7 +386,7 @@ void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
     /* Flush our own buffered output first, or `write` leapfrogs it. */
     fflush(stdout);
 
-    ssize_t done = write((int)fd, &ctx->mem.data[(size_t)buf], (size_t)len);
+    ssize_t done = write((int)fd, &ctx->mem[(size_t)buf], (size_t)len);
     ECALL_RET = (uint64_t)done;
 }
 

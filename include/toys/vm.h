@@ -1,18 +1,15 @@
 #ifndef TOYS_VM_H
 #define TOYS_VM_H
 
-#include "toys/vec.h"
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 
 /**
- * Default address space cap in bytes.
- * Growth past the resolved cap is fatal, see `WstVmContext`.
+ * Default guest RAM size in bytes, reserved once on load.
  */
-#define WST_VM_MEM_DEFAULT_MAX ((size_t)1024 * 1024 * 1024)
+#define WST_VM_MEM_DEFAULT_MAX ((size_t)256 * 1024 * 1024)
 
 /**
  * Default initial stack size.
@@ -21,8 +18,9 @@
 #define WST_VM_STACK_DEFAULT_SIZE ((size_t)64 * 1024)
 
 /**
- * Stack pointer register. Roles: `x0` is zero, `x1`-`x4` take params
- * with the return value in `x1`, `x5`-`x6` are callee-saved.
+ * Stack pointer register. Roles: `x0` is zero, `x1`-`x3` take params
+ * with the return value in `x1`, `x4`-`x5` are callee-saved, `x6` is
+ * the link register and caller-saved with the params, `x7` is sp.
  * `vm.regs[WST_VM_REG_SP]` grows down inside the `WstVmStack` range.
  */
 #define WST_VM_REG_SP (7)
@@ -56,7 +54,7 @@ typedef enum {
     WST_VM_SUB      = 0x13, /* sub 2 GPRs, store res in 3rd GPR. */
     WST_VM_MUL      = 0x14,
     WST_VM_DIV      = 0x15,
-    WST_VM_MOD      = 0x16,
+    WST_VM_REM      = 0x16, /* signed remainder, RISC-V REM */
     WST_VM_AND      = 0x17, /* bitwise AND on registers */
     WST_VM_OR       = 0x18, /* bitwise OR on registers */
     WST_VM_XOR      = 0x19, /* bitwise XOR on registers */
@@ -70,7 +68,7 @@ typedef enum {
     WST_VM_FMUL     = 0x21,
     WST_VM_FDIV     = 0x22, 
     WST_VM_FSQRT    = 0x23,
-    /* 0x24 retired, `pow` is not implemented in hardware. */
+    /* 0x24 retired */
     WST_VM_FEQ      = 0x25, /* FP compare equal, 0/1 stored into GPR */
     WST_VM_FLT      = 0x26, /* FP compare less than, 0/1 stored into GPR */
     WST_VM_FLE      = 0x27, /* FP compare less then equal, 0/1 stored into GPR */
@@ -79,6 +77,18 @@ typedef enum {
     WST_VM_RET      = 0x2A, /* pop pc from stack */
     WST_VM_INI      = 0x2B, /* read decimal integer from stdin into GPR */
     WST_VM_INF      = 0x2C, /* read double from stdin into FP register */
+    WST_VM_JALR     = 0x2D, /* jump to register with link */
+    WST_VM_DIVU     = 0x2E, /* unsigned divide */
+    WST_VM_REMU     = 0x2F, /* unsigned remainder */
+    WST_VM_ANDI     = 0x30, /* bitwise AND with immediate */
+    WST_VM_ORI      = 0x31, /* bitwise OR with immediate */
+    WST_VM_XORI     = 0x32, /* bitwise XOR with immediate */
+    WST_VM_SLLI     = 0x33, /* shift left logical with immediate */
+    WST_VM_SRLI     = 0x34, /* shift right logical with immediate */
+    WST_VM_SRAI     = 0x35, /* shift right arithmetic with immediate */
+    WST_VM_SLTI     = 0x36, /* set if less than immediate, signed */
+    WST_VM_SLTIU    = 0x37, /* set if less than immediate, unsigned */
+    WST_VM_AUIPC    = 0x38, /* add upper immediate to pc */
 } WstVmOp;
 
 /**
@@ -150,7 +160,7 @@ typedef struct WstVm {
 } WstVm;
 
 /**
- * Value stack taken from virtual memory after the program image.
+ * Value stack at the top of guest RAM, growing down.
  *
  * `size` is taken on load, zero means `WST_VM_STACK_DEFAULT_SIZE`.
  * `base`/`top` are outputs set by `wst_vm_context_load`.
@@ -166,16 +176,18 @@ typedef struct {
 } WstVmStack;
 
 /**
- * Vm context that manages virtual memory and saves entry point.
+ * Vm context that owns guest physical memory.
  *
- * `mem_max` caps `vaddr + memsz` on load and every load/store/fetch
- * past it is fatal. Zero means `WST_VM_MEM_DEFAULT_MAX`, set it
- * before `wst_vm_context_load` to override.
+ * `mem` is reserved once on load with `calloc`, never expanded.
+ * `mem_size` is the reserved size. `mem_max` caps it, zero means
+ * `WST_VM_MEM_DEFAULT_MAX`, set it before `wst_vm_context_load`
+ * to override. Every load/store/fetch past the reservation is fatal.
  *
  * After load user should update stack pointer to `ctx.stack.top`.
  */
 typedef struct WstVmContext {
-    WstVecU8 mem;
+    uint8_t *mem;
+    size_t mem_size;
     size_t entry;
     size_t mem_max;
     WstVmStack stack;
@@ -206,6 +218,8 @@ typedef struct {
     /** Mask of operands that are fp registers instead of GPRs. */
     unsigned fregs;
     WstVmInstrHandler handler;
+    /** Immediate scaling in access-size units, 1 for non-memory ops. */
+    unsigned imm_scale;
 } WstVmInstrDesc;
 
 /**
@@ -221,8 +235,8 @@ extern const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT];
 bool wst_vm_init(WstVm *vm);
 
 /**
- * Load program file into a fresh address space, carving the stack
- * after the image.
+ * Load program file into a fresh address space with the stack
+ * on top of RAM.
  *
  * @return `true` on success, `false` otherwise.
  */

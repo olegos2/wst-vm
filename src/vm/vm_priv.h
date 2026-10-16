@@ -7,6 +7,10 @@
 #include <stdint.h>
 
 
+/* Unsigned and signed integer types of the given width. */
+#define U(sz) uint ## sz ## _t
+#define S(sz) int ## sz ## _t
+
 /* Raw register aliases, need `vm` in scope. No x0 handling here,
  * decoded operands go through VM_REG_READ/WRITE, these are for
  * fixed roles: stack pointer and ecall args. */
@@ -60,6 +64,7 @@ OP(pushqv);
 OP(popqr);
 OP(popqv);
 OP(jal);
+OP(jalr);
 OP(beq);
 OP(bne);
 OP(blt);
@@ -68,7 +73,9 @@ OP(add);
 OP(sub);
 OP(mul);
 OP(div);
-OP(mod);
+OP(rem);
+OP(divu);
+OP(remu);
 OP(and);
 OP(or);
 OP(xor);
@@ -76,6 +83,15 @@ OP(sll);
 OP(srl);
 OP(sra);
 OP(addi);
+OP(andi);
+OP(ori);
+OP(xori);
+OP(slli);
+OP(srli);
+OP(srai);
+OP(slti);
+OP(sltiu);
+OP(auipc);
 OP(lui);
 OP(fadd);
 OP(fsub);

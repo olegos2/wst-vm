@@ -43,23 +43,30 @@ static int run_disasm(const char *path, int count)
 {
     assert(path != NULL);
 
-    WstVecU8 mem = { 0 };
-    size_t entry = 0;
-    if (!wst_prog_load(&mem, &entry, path, WST_VM_MEM_DEFAULT_MAX))
+    uint8_t *mem = calloc(WST_VM_MEM_DEFAULT_MAX, sizeof(uint8_t));
+    if (mem == NULL) {
+        LOG_E("cannot reserve %zu bytes", WST_VM_MEM_DEFAULT_MAX);
         return EXIT_FAILURE;
+    }
+
+    size_t entry = 0;
+    if (!wst_prog_load(mem, WST_VM_MEM_DEFAULT_MAX, &entry, path)) {
+        free(mem);
+        return EXIT_FAILURE;
+    }
 
     int ret = EXIT_SUCCESS;
     size_t addr = entry;
     int done = 0;
     while (1) {
-        if (addr >= mem.length || mem.length - addr < 4) {
+        if (addr >= WST_VM_MEM_DEFAULT_MAX || WST_VM_MEM_DEFAULT_MAX - addr < 4) {
             LOG_E("address %zu past file end", addr);
             ret = EXIT_FAILURE;
             break;
         }
 
         uint32_t word = 0;
-        memcpy(&word, &mem.data[addr], sizeof(word));
+        memcpy(&word, &mem[addr], sizeof(word));
 
         char buf[64] = { 0 };
         if (!wst_vm_disasm_word(word, buf, sizeof(buf))) {
@@ -77,7 +84,7 @@ static int run_disasm(const char *path, int count)
             break;
     }
 
-    wst_vec_u8_free(&mem);
+    free(mem);
     return ret;
 }
 

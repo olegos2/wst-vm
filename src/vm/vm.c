@@ -38,33 +38,32 @@ static size_t vm_stack_size(const WstVmContext *ctx)
 
 static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 {
-    size_t limit = vm_mem_limit(ctx);
-    if (size > limit || addr > (uint64_t)limit - size) {
+    if (size > ctx->mem_size || addr > (uint64_t)ctx->mem_size - size) {
         LOG_E("address %" PRIu64 " past address space end", addr);
-        exit(EXIT_FAILURE);
-    }
-
-    if (wst_vec_u8_ensure(&ctx->mem, (size_t)(addr + size)) != WST_VEC_NO_ERR) {
-        LOG_E("cannot grow address space");
         exit(EXIT_FAILURE);
     }
 }
 
-/* Size-specific accessors, sizes are baked in like flux64 `U(sz)` impls.
- * Direct dereferences: stack slots and data words are aligned in
- * practice, same tradeoff as the reference emulator. */
+/* Size-specific accessors, misaligned access is fatal. */
 #define VM_DEF_MEM_RW(bits) \
-    uint##bits##_t vm_mem_read##bits(WstVmContext *ctx, uint64_t addr) \
+    U(bits) vm_mem_read##bits(WstVmContext *ctx, uint64_t addr) \
     { \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
-        return *(uint##bits##_t *)&ctx->mem.data[(size_t)addr]; \
+        if (addr % ((bits) / 8) != 0) { \
+            LOG_E("misaligned address %" PRIu64, addr); \
+            exit(EXIT_FAILURE); \
+        } \
+        return *(U(bits) *)&ctx->mem[(size_t)addr]; \
     } \
     \
-    void vm_mem_write##bits(WstVmContext *ctx, uint64_t addr, uint##bits##_t value) \
+    void vm_mem_write##bits(WstVmContext *ctx, uint64_t addr, U(bits) value) \
     { \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
-        *(uint##bits##_t *)&ctx->mem.data[(size_t)addr] = value; \
-        wst_vec_u8_seal(&ctx->mem); \
+        if (addr % ((bits) / 8) != 0) { \
+            LOG_E("misaligned address %" PRIu64, addr); \
+            exit(EXIT_FAILURE); \
+        } \
+        *(U(bits) *)&ctx->mem[(size_t)addr] = value; \
     }
 
 VM_DEF_MEM_RW(64)
@@ -121,31 +120,43 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
     assert(ctx != NULL);
     assert(path != NULL);
 
-    wst_vec_u8_free(&ctx->mem);
+    free(ctx->mem);
+    ctx->mem = NULL;
+    ctx->mem_size = 0;
     ctx->entry = 0;
     ctx->stack.base = 0;
     ctx->stack.top = 0;
 
-    size_t entry = 0;
-    if (!wst_prog_load(&ctx->mem, &entry, path, vm_mem_limit(ctx)))
-        return false;
-
-    if (ctx->mem.length > SIZE_MAX - 8)
-        return false;
-
-    size_t base = (ctx->mem.length + 7) & ~(size_t)7;
-    size_t stack_size = vm_stack_size(ctx);
     size_t limit = vm_mem_limit(ctx);
-    if (stack_size > limit || base > limit - stack_size) {
+    size_t top = limit & ~(size_t)7;
+    size_t stack_size = vm_stack_size(ctx);
+    if (stack_size > top) {
         LOG_E("stack of %zu bytes past address space end", stack_size);
         return false;
     }
-    if (wst_vec_u8_resize(&ctx->mem, base + stack_size) != WST_VEC_NO_ERR)
-        return false;
+    stack_size = (stack_size + 7) & ~(size_t)7;
 
+    uint8_t *mem = calloc(limit, sizeof(uint8_t));
+    if (mem == NULL) {
+        LOG_E("cannot reserve %zu bytes", limit);
+        return false;
+    }
+
+    /* Direct dereferences need an 8-aligned base. */
+    assert(((uintptr_t)mem & 7u) == 0);
+
+    size_t entry = 0;
+    size_t base = top - stack_size;
+    if (!wst_prog_load(mem, base, &entry, path)) {
+        free(mem);
+        return false;
+    }
+
+    ctx->mem = mem;
+    ctx->mem_size = limit;
     ctx->entry = entry;
     ctx->stack.base = base;
-    ctx->stack.top = base + stack_size;
+    ctx->stack.top = top;
     return true;
 }
 
@@ -154,10 +165,9 @@ void wst_vm_context_free(WstVmContext *ctx)
     if (ctx == NULL)
         return;
 
-    WstVecErr err = wst_vec_u8_free(&ctx->mem);
-    if (err != WST_VEC_NO_ERR)
-        LOG_W("address space damaged: %s", wst_vec_err_str(err));
-
+    free(ctx->mem);
+    ctx->mem = NULL;
+    ctx->mem_size = 0;
     ctx->entry = 0;
     ctx->stack.base = 0;
     ctx->stack.top = 0;
@@ -174,14 +184,14 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
         return false;
     }
 
-    if (vm->pc >= ctx->mem.length || ctx->mem.length - vm->pc < 4) {
-        LOG_E("pc %zu past program end %zu", vm->pc, ctx->mem.length);
+    if (vm->pc >= ctx->mem_size || ctx->mem_size - vm->pc < 4) {
+        LOG_E("pc %zu past program end %zu", vm->pc, ctx->mem_size);
         return false;
     }
 
     /* Fetch never grows memory, past-end is a decode error (checked above).
      * `pc` is 4-aligned here, so this is an aligned dereference. */
-    uint32_t word = *(const uint32_t *)&ctx->mem.data[vm->pc];
+    uint32_t word = *(const uint32_t *)&ctx->mem[vm->pc];
 
     WstVmOp op = (WstVmOp)(word & 0x7Fu);
     const WstVmInstrDesc *desc = &wst_vm_op_table[(unsigned)op];
