@@ -1,6 +1,7 @@
 #include "toys/prog.h"
 #include "toys/debug.h"
 #include "toys/file.h"
+#include "toys/vm.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -152,15 +153,15 @@ static bool prog_check_segs(const char *path, const WstFile *file,
     return true;
 }
 
-/* Entry must point at a whole 4-byte word inside the span. */
+/* Entry must point at a whole instruction word inside the span. */
 static bool prog_check_entry(const char *path, const WstProgHeader *hdr,
                              size_t total)
 {
     assert(path != NULL);
     assert(hdr != NULL);
 
-    if (hdr->entry % 4 != 0 || hdr->entry >= total ||
-        total - (size_t)hdr->entry < 4) {
+    if (hdr->entry % WST_VM_INSTR_SIZE != 0 || hdr->entry >= total ||
+        total - (size_t)hdr->entry < WST_VM_INSTR_SIZE) {
         LOG_E("'%s' has bad entry point", path);
         return false;
     }
@@ -221,11 +222,11 @@ bool wst_prog_save(const char *path, const uint8_t *code, size_t code_len,
     assert(code_len == 0 || code != NULL);
     assert(data_len == 0 || data != NULL);
 
-    if (code_len % 4 != 0) {
+    if (code_len % WST_VM_INSTR_SIZE != 0) {
         LOG_E("code of 0x%08zx bytes is not a whole word count", code_len);
         return false;
     }
-    if (entry % 4 != 0 || (code_len > 0 && entry >= code_len)) {
+    if (entry % WST_VM_INSTR_SIZE != 0 || (code_len > 0 && entry >= code_len)) {
         LOG_E("bad entry point 0x%08zx", entry);
         return false;
     }

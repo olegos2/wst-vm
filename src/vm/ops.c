@@ -99,6 +99,28 @@ static void vm_divmod(uint64_t a, uint64_t b, uint64_t *quot, uint64_t *rem)
     *rem = (uint64_t)(sign_a % sign_b);
 }
 
+/* Double as raw bits, a union punning, no aliasing tricks. */
+static uint64_t vm_fp_bits(double num)
+{
+    union {
+        double num;
+        uint64_t bits;
+    } pun = { .num = num };
+
+    return pun.bits;
+}
+
+/* Raw bits as a double, see `vm_fp_bits`. */
+static double vm_fp_num(uint64_t bits)
+{
+    union {
+        double num;
+        uint64_t bits;
+    } pun = { .bits = bits };
+
+    return pun.num;
+}
+
 /* Exact comparison is intended here: feq follows RISC-V, where
  * NaN never equals and +0.0 equals -0.0. */
 #pragma GCC diagnostic push
@@ -230,16 +252,13 @@ void vm_exec_sw(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 void vm_exec_fld(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 8u;
-    uint64_t bits = vm_mem_read64(ctx, addr);
-    memcpy(&vm->fp[ins->rd], &bits, sizeof(bits));
+    vm->fp[ins->rd] = vm_fp_num(vm_mem_read64(ctx, addr));
 }
 
 void vm_exec_fst(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t addr = VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm * 8u;
-    uint64_t bits = 0;
-    memcpy(&bits, &vm->fp[ins->rs2], sizeof(bits));
-    vm_mem_write64(ctx, addr, bits);
+    vm_mem_write64(ctx, addr, vm_fp_bits(vm->fp[ins->rs2]));
 }
 
 void vm_exec_pushqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
@@ -249,9 +268,7 @@ void vm_exec_pushqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 void vm_exec_pushqv(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t bits = 0;
-    memcpy(&bits, &vm->fp[ins->rs1], sizeof(bits));
-    vm_stack_push64(vm, ctx, ins->addr, bits);
+    vm_stack_push64(vm, ctx, ins->addr, vm_fp_bits(vm->fp[ins->rs1]));
 }
 
 void vm_exec_popqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
@@ -261,14 +278,13 @@ void vm_exec_popqr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 void vm_exec_popqv(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    uint64_t bits = vm_stack_pop64(vm, ctx, ins->addr);
-    memcpy(&vm->fp[ins->rd], &bits, sizeof(bits));
+    vm->fp[ins->rd] = vm_fp_num(vm_stack_pop64(vm, ctx, ins->addr));
 }
 
 void vm_exec_jal(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     (void)ctx;
-    VM_REG_WRITE(vm, ins->rd, (uint64_t)(ins->addr + 4));
+    VM_REG_WRITE(vm, ins->rd, (uint64_t)(ins->addr + WST_VM_INSTR_SIZE));
     vm->pc = (size_t)((int64_t)ins->addr + ins->imm);
 }
 
@@ -276,8 +292,8 @@ void vm_exec_jalr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     (void)ctx;
     uint64_t target = (VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm) & ~(uint64_t)1u;
-    VM_REG_WRITE(vm, ins->rd, (uint64_t)(ins->addr + 4));
-    if (target % 4 != 0) {
+    VM_REG_WRITE(vm, ins->rd, (uint64_t)(ins->addr + WST_VM_INSTR_SIZE));
+    if (target % WST_VM_INSTR_SIZE != 0) {
         LOG_E("misaligned jalr target 0x%08" PRIx64 " at pc 0x%08zx",
               target, ins->addr);
         exit(EXIT_FAILURE);
@@ -414,14 +430,15 @@ void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
 void vm_exec_call(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
-    vm_stack_push64(vm, ctx, ins->addr, (uint64_t)(ins->addr + 4));
+    vm_stack_push64(vm, ctx, ins->addr,
+                    (uint64_t)(ins->addr + WST_VM_INSTR_SIZE));
     vm->pc = (size_t)((int64_t)ins->addr + ins->imm);
 }
 
 void vm_exec_ret(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t target = vm_stack_pop64(vm, ctx, ins->addr);
-    if (target % 4 != 0) {
+    if (target % WST_VM_INSTR_SIZE != 0) {
         LOG_E("misaligned ret target 0x%08" PRIx64 " at pc 0x%08zx",
               target, ins->addr);
         exit(EXIT_FAILURE);

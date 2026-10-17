@@ -229,9 +229,12 @@ bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
             return false;
         }
 
-        uint64_t bits = 0;
-        memcpy(&bits, &num, sizeof(bits));
-        if (!asm_data_bits(ctx, bits, 8, lineno))
+        union {
+            double num;
+            uint64_t bits;
+        } pun = { .num = num };
+
+        if (!asm_data_bits(ctx, pun.bits, 8, lineno))
             return false;
     }
     else if (strcmp(type, "str") == 0) {

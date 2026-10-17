@@ -97,7 +97,7 @@ static bool asm_parse_reg(const char *tok, bool is_float, unsigned *reg_out)
         return false;
     if (tok[0] != (is_float ? 'f' : 'x'))
         return false;
-    if (tok[1] < '0' || tok[1] > '7')
+    if (tok[1] < '0' || (unsigned)(tok[1] - '0') >= WST_VM_NUM_GPR)
         return false;
 
     *reg_out = (unsigned)(tok[1] - '0');
@@ -120,56 +120,59 @@ static bool asm_parse_num(const char *tok, int64_t *num_out)
     return true;
 }
 
-/* Split `args` by commas in place, trimming spaces, at most 3 operands. */
-static bool asm_split_ops(char *args, char *toks[3], size_t *ntoks_out,
-                          size_t lineno)
+/* Split `args` by commas in place, trimming spaces, one token per slot. */
+static bool asm_split_ops(char *args, char *toks[WST_VM_OPND_COUNT],
+                          size_t *ntoks_out, size_t lineno)
 {
     assert(args != NULL);
     assert(toks != NULL);
     assert(ntoks_out != NULL);
 
-    size_t alen = strlen(args);
-    while (alen > 0 && asm_is_ws(args[alen - 1]))
-        alen--;
-    args[alen] = '\0';
+    size_t args_len = strlen(args);
+    while (args_len > 0 && asm_is_ws(args[args_len - 1]))
+        args_len--;
+    args[args_len] = '\0';
 
-    if (alen > 0 && args[alen - 1] == ',') {
+    if (args_len > 0 && args[args_len - 1] == ',') {
         LOG_E("line %zu: trailing comma", lineno);
         return false;
     }
 
-    size_t n = 0;
-    char *p = args;
+    size_t ntoks = 0;
+    char *pos = args;
     while (1) {
-        p = (char *)asm_skip_ws(p);
-        if (*p == '\0')
+        pos = (char *)asm_skip_ws(pos);
+        if (*pos == '\0')
             break;
 
-        if (n == 3) {
+        if (ntoks == WST_VM_OPND_COUNT) {
             LOG_E("line %zu: too many operands", lineno);
             return false;
         }
 
-        toks[n++] = p;
-        while (*p != '\0' && *p != ',')
-            p++;
+        char *tok = pos;
+        ntoks++;
+        toks[ntoks - 1] = tok;
 
-        if (*p == ',') {
-            *p = '\0';
-            p++;
+        while (*pos != '\0' && *pos != ',')
+            pos++;
+
+        if (*pos == ',') {
+            *pos = '\0';
+            pos++;
         }
 
-        char *t = toks[n - 1] + strlen(toks[n - 1]);
-        while (t > toks[n - 1] && asm_is_ws(t[-1]))
-            *--t = '\0';
+        char *end = tok + strlen(tok);
+        while (end > tok && asm_is_ws(end[-1]))
+            *--end = '\0';
 
-        if (toks[n - 1][0] == '\0') {
+        if (tok[0] == '\0') {
             LOG_E("line %zu: empty operand", lineno);
             return false;
         }
     }
 
-    *ntoks_out = n;
+    *ntoks_out = ntoks;
     return true;
 }
 
@@ -193,15 +196,15 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
         return false;
     }
 
-    char *toks[3] = { NULL, NULL, NULL };
+    char *toks[WST_VM_OPND_COUNT] = { 0 };
     size_t ntoks = 0;
     if (!asm_split_ops((char *)mnemonic + mnemonic_len, toks, &ntoks, lineno))
         return false;
 
     /* Operand bits ascend in assembly order: RD, RS1, RS2, IMM. */
     size_t need = 0;
-    for (unsigned m = desc->operands; m != 0; m >>= 1)
-        need += m & 1u;
+    for (unsigned mask = desc->operands; mask != 0; mask >>= 1)
+        need += mask & 1u;
 
     if (ntoks != need) {
         LOG_E("line %zu: '%s' needs %zu operands, got %zu",
@@ -213,13 +216,13 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
     unsigned rs1 = 0;
     unsigned rs2 = 0;
     int64_t imm = 0;
-    size_t ti = 0;
+    size_t tok_idx = 0;
 
     for (unsigned slot = WST_VM_OPND_RD; slot <= WST_VM_OPND_IMM; slot <<= 1) {
         if ((desc->operands & slot) == 0)
             continue;
 
-        const char *tok = toks[ti++];
+        const char *tok = toks[tok_idx++];
 
         if (slot != WST_VM_OPND_IMM) {
             bool is_float = (desc->fregs & slot) != 0;

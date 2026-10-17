@@ -30,8 +30,18 @@
  */
 #define WST_VM_INSTR_TEXT_CAP 64
 
+/**
+ * Instruction size in bytes, pcs and code addresses align to it.
+ */
+#define WST_VM_INSTR_SIZE 4
+
 #define WST_VM_OPCODE_BITS 7
 #define WST_VM_NUM_OPCODES (1u << WST_VM_OPCODE_BITS)
+
+/**
+ * Operand slots, an instruction takes at most this many operands.
+ */
+#define WST_VM_OPND_COUNT 4
 
 #define WST_VM_NUM_GPR 8
 #define WST_VM_NUM_FP  8

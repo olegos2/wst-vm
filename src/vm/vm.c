@@ -109,10 +109,10 @@ bool wst_vm_init(WstVm *vm)
 {
     assert(vm != NULL);
 
-    for (size_t i = 0; i < 8; i++) {
+    for (size_t i = 0; i < WST_VM_NUM_GPR; i++)
         vm->regs[i] = 0;
+    for (size_t i = 0; i < WST_VM_NUM_FP; i++)
         vm->fp[i] = 0.0;
-    }
     vm->pc = 0;
     return true;
 }
@@ -289,12 +289,13 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
     assert(ctx != NULL);
     assert(ins != NULL);
 
-    if (vm->pc % 4 != 0) {
+    if (vm->pc % WST_VM_INSTR_SIZE != 0) {
         LOG_E("misaligned pc 0x%08zx", vm->pc);
         return false;
     }
 
-    if (vm->pc >= ctx->mem_size || ctx->mem_size - vm->pc < 4) {
+    if (vm->pc >= ctx->mem_size ||
+        ctx->mem_size - vm->pc < WST_VM_INSTR_SIZE) {
         LOG_E("pc 0x%08zx past mem end 0x%08zx", vm->pc, ctx->mem_size);
         return false;
     }
@@ -325,7 +326,7 @@ void wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     WstVmInstrHandler handler = wst_vm_op_table[(unsigned)ins->op].handler;
     assert(handler != NULL);
 
-    vm->pc = ins->addr + 4;
+    vm->pc = ins->addr + WST_VM_INSTR_SIZE;
     handler(vm, ctx, ins);
 }
 

@@ -174,34 +174,34 @@ section .text
     ret
 
 :_test_mem
-    addi x1, x0, -42      # x1 = -42
-    st x0, x1, :m1        # M[m1] = -42
-    ld x2, x0, :m1        # x2 = M[m1]
-    outi x2
+    addi   x1, x0, -42    # x1 = -42
+    st     x0, x1, :m1    # M[m1] = -42
+    ld     x2, x0, :m1    # x2 = M[m1]
+    outi   x2
 
-    addi x1, x0, -7       # x1 = -7
-    sw x0, x1, :m2
-    lw x2, x0, :m2
-    outi x2               # -7, sign-extended
+    addi   x1, x0, -7     # x1 = -7
+    sw     x0, x1, :m2
+    lw     x2, x0, :m2
+    outi   x2             # -7, sign-extended
 
-    ld x2, x0, :m2
-    outi x2               # 4294967289, high bytes untouched
+    ld     x2, x0, :m2
+    outi   x2             # 4294967289, high bytes untouched
 
-    fld f0, x0, :fp64_a   # 2.5
-    fst x0, f0, :m3       # M[m3] = 2.5 bits
-    fld f1, x0, :m3
-    outf f1               # 2.5
+    fld    f0, x0, :fp64_a # 2.5
+    fst    x0, f0, :m3    # M[m3] = 2.5 bits
+    fld    f1, x0, :m3
+    outf   f1             # 2.5
 
-    addi x1, x0, 123
+    addi   x1, x0, 123
     pushqr x1
-    addi x1, x0, 0
-    popqr x2
-    outi x2               # 123
+    addi   x1, x0, 0
+    popqr  x2
+    outi   x2             # 123
 
     pushqv f0
-    fld f0, x0, :fp64_b   # clobber f0 with 4.0
-    popqv f1
-    outf f1               # 2.5
+    fld    f0, x0, :fp64_b # clobber f0 with 4.0
+    popqv  f1
+    outf   f1             # 2.5
     ret
 
 :_test_fp_arith

@@ -32,8 +32,8 @@ static int run_asm(const char *in_path, const char *out_path)
     wst_file_close(&src);
 
     bool ok = wst_prog_save(out_path, (const uint8_t *)obj.code.data,
-                            obj.code.length * 4, obj.data.data,
-                            obj.data.length, obj.entry);
+                            obj.code.length * WST_VM_INSTR_SIZE,
+                            obj.data.data, obj.data.length, obj.entry);
     wst_vm_asm_object_free(&obj);
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -56,10 +56,10 @@ static int run_disasm(const char *path, int count)
 
     int ret = EXIT_SUCCESS;
     size_t addr = entry;
-    int done = 0;
+    int printed = 0;
     while (1) {
         if (addr >= WST_VM_MEM_DEFAULT_MAX ||
-            WST_VM_MEM_DEFAULT_MAX - addr < 4) {
+            WST_VM_MEM_DEFAULT_MAX - addr < WST_VM_INSTR_SIZE) {
             LOG_E("address 0x%08zx past file end", addr);
             ret = EXIT_FAILURE;
             break;
@@ -81,12 +81,12 @@ static int run_disasm(const char *path, int count)
         }
 
         printf("0x%08zx  %s\n", addr, buf);
-        done++;
-        addr += 4;
+        printed++;
+        addr += WST_VM_INSTR_SIZE;
 
         if (count <= 0 && ins.op == WST_VM_HLT)
             break;
-        if (count > 0 && done >= count)
+        if (count > 0 && printed >= count)
             break;
     }
 

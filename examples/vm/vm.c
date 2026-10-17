@@ -8,9 +8,9 @@
 
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
-/* Defaults matching WST_VM_MEM_DEFAULT_MAX, WST_VM_STACK_DEFAULT_SIZE. */
-#define VM_DEFAULT_MEM_MB 256
-#define VM_DEFAULT_STACK_KB 64
+/* Library defaults in MiB and KiB. */
+#define VM_DEFAULT_MEM_MB ((int)(WST_VM_MEM_DEFAULT_MAX / (1024 * 1024)))
+#define VM_DEFAULT_STACK_KB ((int)(WST_VM_STACK_DEFAULT_SIZE / 1024))
 
 static WstVm vm;
 static WstVmContext ctx;

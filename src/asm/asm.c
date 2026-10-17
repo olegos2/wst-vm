@@ -63,6 +63,14 @@ static bool asm_section(AsmCtx *ctx, const char *line, size_t lineno)
     return false;
 }
 
+/* Code size in bytes, labels and fixups count bytes, not words. */
+static size_t asm_code_bytes(const AsmCtx *ctx)
+{
+    assert(ctx != NULL);
+
+    return ctx->obj->code.length * WST_VM_INSTR_SIZE;
+}
+
 static bool asm_label(AsmCtx *ctx, const char *line, size_t lineno)
 {
     assert(ctx != NULL);
@@ -75,7 +83,7 @@ static bool asm_label(AsmCtx *ctx, const char *line, size_t lineno)
         return false;
     }
 
-    return asm_sym_add(ctx, name, ctx->obj->code.length * 4, ASM_SYM_LABEL, lineno);
+    return asm_sym_add(ctx, name, asm_code_bytes(ctx), ASM_SYM_LABEL, lineno);
 }
 
 static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
@@ -84,7 +92,7 @@ static bool asm_text_line(AsmCtx *ctx, char *line, size_t lineno)
     assert(line != NULL);
     assert(ctx->section == ASM_TEXT);
 
-    size_t off = ctx->obj->code.length * 4;
+    size_t off = asm_code_bytes(ctx);
     uint32_t word = 0;
     char *sym = NULL;
     WstVmInstrFormat fmt = WST_VM_INSTR_FORMAT_INVALID;
@@ -132,28 +140,29 @@ static bool asm_source_line(AsmCtx *ctx, char *line, size_t lineno)
     assert(ctx != NULL);
     assert(line != NULL);
 
-    const char *p = asm_skip_ws(line);
-    if (*p == '\0')
+    const char *pos = asm_skip_ws(line);
+    if (*pos == '\0')
         return true;
 
-    if (strncmp(p, "section", 7) == 0 && (p[7] == '\0' || asm_is_ws(p[7])))
+    if (strncmp(pos, "section", 7) == 0 &&
+        (pos[7] == '\0' || asm_is_ws(pos[7])))
         return asm_section(ctx, line, lineno);
     if (ctx->section == ASM_DATA)
-        return asm_data_line(ctx, p, lineno);
-    if (p[0] == ':')
-        return asm_label(ctx, p, lineno);
+        return asm_data_line(ctx, pos, lineno);
+    if (pos[0] == ':')
+        return asm_label(ctx, pos, lineno);
 
     /* `name:` outside .data is a misplaced data entry, not an instr. */
     size_t name_len = 0;
-    while (asm_is_name_char(p[name_len]))
+    while (asm_is_name_char(pos[name_len]))
         name_len++;
 
-    if (p[name_len] == ':') {
+    if (pos[name_len] == ':') {
         LOG_E("line %zu: data entries belong in section .data", lineno);
         return false;
     }
 
-    return asm_text_line(ctx, (char *)p, lineno);
+    return asm_text_line(ctx, (char *)pos, lineno);
 }
 
 /* Patch one recorded `:name` use with its absolute or PC-relative imm. */
@@ -231,7 +240,7 @@ static bool asm_resolve(AsmCtx *ctx)
 {
     assert(ctx != NULL);
 
-    size_t data_base = wst_prog_data_addr(ctx->obj->code.length * 4);
+    size_t data_base = wst_prog_data_addr(asm_code_bytes(ctx));
 
     for (size_t i = 0; i < ctx->fixups.length; i++) {
         AsmFixup fix;
