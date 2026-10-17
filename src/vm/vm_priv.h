@@ -25,11 +25,11 @@
 #define R_SP R_x7
 
 /* ecall convention: number in x1, args in x2-x4, result in x1. */
-#define ECALL_NUM R_x1
+#define ECALL_NUM  R_x1
 #define ECALL_ARG0 R_x2
 #define ECALL_ARG1 R_x3
 #define ECALL_ARG2 R_x4
-#define ECALL_RET R_x1
+#define ECALL_RET  R_x1
 
 
 /** Read guest memory, one accessor per operand size. */

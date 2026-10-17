@@ -31,7 +31,8 @@ static bool prog_read_header(const char *path, const WstFile *file,
     }
 
     if (hdr_out->version != WST_PROG_VERSION) {
-        LOG_E("'%s' has unsupported version %u", path, hdr_out->version);
+        LOG_E("'%s' has unsupported version %" PRIu32, path,
+              hdr_out->version);
         return false;
     }
 
@@ -79,8 +80,8 @@ static bool prog_check_seg(const char *path, const WstFile *file,
 
     if (mem_max != 0 &&
         (seg->memsz > mem_max || seg->vaddr > mem_max - seg->memsz)) {
-        LOG_E("'%s' segment %" PRIu64 " past address space end",
-              path, idx);
+        LOG_E("'%s' segment %" PRIu64 " past mem end 0x%08zx",
+              path, idx, mem_max);
         return false;
     }
 
@@ -200,7 +201,8 @@ bool wst_prog_load(uint8_t *mem, size_t mem_size, size_t *entry_out,
 
     *entry_out = (size_t)hdr.entry;
 
-    LOG_I("loaded '%s': %zu bytes at entry %zu", path, total_segs, *entry_out);
+    LOG_I("loaded '%s': 0x%08zx bytes at entry 0x%08zx",
+          path, total_segs, *entry_out);
     wst_file_close(&file);
     return true;
 }
@@ -220,11 +222,11 @@ bool wst_prog_save(const char *path, const uint8_t *code, size_t code_len,
     assert(data_len == 0 || data != NULL);
 
     if (code_len % 4 != 0) {
-        LOG_E("code of %zu bytes is not a whole word count", code_len);
+        LOG_E("code of 0x%08zx bytes is not a whole word count", code_len);
         return false;
     }
     if (entry % 4 != 0 || (code_len > 0 && entry >= code_len)) {
-        LOG_E("bad entry point %zu", entry);
+        LOG_E("bad entry point 0x%08zx", entry);
         return false;
     }
 
@@ -279,6 +281,7 @@ bool wst_prog_save(const char *path, const uint8_t *code, size_t code_len,
         return false;
     }
 
-    LOG_I("wrote '%s': %zu code and %zu data bytes", path, code_len, data_len);
+    LOG_I("wrote '%s': 0x%08zx code and 0x%08zx data bytes",
+          path, code_len, data_len);
     return true;
 }

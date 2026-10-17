@@ -47,7 +47,7 @@ bool asm_sym_add(AsmCtx *ctx, const char *name, size_t addr,
     AsmSym sym = { .name = dup, .addr = addr, .type = type };
     WstVecErr err = wst_vec_sym_push(&ctx->syms, &sym);
     if (err != WST_VEC_NO_ERR) {
-        LOG_E("line %zu: %s", lineno, wst_vec_err_str(err));
+        LOG_E("line %zu: symbol table %s", lineno, wst_vec_err_str(err));
         free(dup);
         return false;
     }
@@ -69,7 +69,7 @@ bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
     AsmFixup fix = { .off = off, .fmt = fmt, .name = dup, .lineno = lineno };
     WstVecErr err = wst_vec_fixup_push(&ctx->fixups, &fix);
     if (err != WST_VEC_NO_ERR) {
-        LOG_E("line %zu: %s", lineno, wst_vec_err_str(err));
+        LOG_E("line %zu: fixup table %s", lineno, wst_vec_err_str(err));
         free(dup);
         return false;
     }

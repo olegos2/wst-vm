@@ -1,7 +1,6 @@
 #include "toys/argparse.h"
 #include "toys/asm.h"
 #include "toys/debug.h"
-#include "toys/disasm.h"
 #include "toys/file.h"
 #include "toys/prog.h"
 #include "toys/vm.h"
@@ -45,7 +44,7 @@ static int run_disasm(const char *path, int count)
 
     uint8_t *mem = calloc(WST_VM_MEM_DEFAULT_MAX, sizeof(uint8_t));
     if (mem == NULL) {
-        LOG_E("cannot reserve %zu bytes", WST_VM_MEM_DEFAULT_MAX);
+        LOG_E("cannot reserve 0x%08zx bytes", WST_VM_MEM_DEFAULT_MAX);
         return EXIT_FAILURE;
     }
 
@@ -59,8 +58,9 @@ static int run_disasm(const char *path, int count)
     size_t addr = entry;
     int done = 0;
     while (1) {
-        if (addr >= WST_VM_MEM_DEFAULT_MAX || WST_VM_MEM_DEFAULT_MAX - addr < 4) {
-            LOG_E("address %zu past file end", addr);
+        if (addr >= WST_VM_MEM_DEFAULT_MAX ||
+            WST_VM_MEM_DEFAULT_MAX - addr < 4) {
+            LOG_E("address 0x%08zx past file end", addr);
             ret = EXIT_FAILURE;
             break;
         }
@@ -68,17 +68,23 @@ static int run_disasm(const char *path, int count)
         uint32_t word = 0;
         memcpy(&word, &mem[addr], sizeof(word));
 
-        char buf[64] = { 0 };
-        if (!wst_vm_disasm_word(word, buf, sizeof(buf))) {
+        WstVmInstr ins = { 0 };
+        if (!wst_vm_decode_word(word, addr, &ins)) {
             ret = EXIT_FAILURE;
             break;
         }
 
-        printf("%zu: %s\n", addr, buf);
+        char buf[WST_VM_INSTR_TEXT_CAP] = { 0 };
+        if (!wst_vm_instr_text(&ins, buf, sizeof(buf))) {
+            ret = EXIT_FAILURE;
+            break;
+        }
+
+        printf("0x%08zx  %s\n", addr, buf);
         done++;
         addr += 4;
 
-        if (count <= 0 && (word & 0x7Fu) == WST_VM_HLT)
+        if (count <= 0 && ins.op == WST_VM_HLT)
             break;
         if (count > 0 && done >= count)
             break;

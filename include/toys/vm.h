@@ -7,7 +7,7 @@
 
 
 /**
- * Default guest RAM size in bytes, reserved once on load.
+ * Default memory size in bytes, reserved once on load.
  */
 #define WST_VM_MEM_DEFAULT_MAX ((size_t)256 * 1024 * 1024)
 
@@ -23,10 +23,18 @@
  * the link register and caller-saved with the params, `x7` is sp.
  * `vm.regs[WST_VM_REG_SP]` grows down inside the `WstVmStack` range.
  */
-#define WST_VM_REG_SP (7)
+#define WST_VM_REG_SP 7
 
-#define WST_VM_OPCODE_BITS (7)
-#define WST_VM_OPCODE_COUNT (1u << WST_VM_OPCODE_BITS)
+/**
+ * Buffer size that always holds instruction text.
+ */
+#define WST_VM_INSTR_TEXT_CAP 64
+
+#define WST_VM_OPCODE_BITS 7
+#define WST_VM_NUM_OPCODES (1u << WST_VM_OPCODE_BITS)
+
+#define WST_VM_NUM_GPR 8
+#define WST_VM_NUM_FP  8
 
 /**
  * Instruction set, enum values match opcode bytes.
@@ -95,7 +103,7 @@ typedef enum {
  * Host calls for `ecall`, number goes in `x1`.
  */
 typedef enum {
-    WST_VM_SYS_EXIT = 0,    /* exit with code from x2 */
+    WST_VM_SYS_EXIT  = 0,   /* exit with code from x2 */
     WST_VM_SYS_WRITE = 1,   /* write x4 bytes from x3 to fd x2, count back in x1 */
 } WstVmSyscall;
 
@@ -152,9 +160,9 @@ typedef struct WstVmInstr {
  */
 typedef struct WstVm {
     /** General purpose registers */
-    uint64_t regs[8];
+    uint64_t regs[WST_VM_NUM_GPR];
     /** FP registers */
-    double fp[8];
+    double fp[WST_VM_NUM_FP];
     /** Program counter */
     size_t pc;
 } WstVm;
@@ -225,7 +233,7 @@ typedef struct {
 /**
  * Opcode table, indexed by opcode byte. Empty rows are invalid opcodes.
  */
-extern const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT];
+extern const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES];
 
 /**
  * Zero the state. Infallible, kept boolean for a stable API.
@@ -253,6 +261,21 @@ void wst_vm_context_free(WstVmContext *ctx);
  * @return `true` when instruction was decoded, `false` on error.
  */
 bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins);
+
+/**
+ * Decode one instruction word, `addr` goes to `ins->addr`.
+ *
+ * @return `true` when word was decoded, `false` on unknown opcode.
+ */
+bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins);
+
+/**
+ * Write one decoded instruction as `mnemonic operands` into `buf`.
+ * Output can be re-assembled. `WST_VM_INSTR_TEXT_CAP` always fits.
+ *
+ * @return `true` on success, `false` when `buf` is too small.
+ */
+bool wst_vm_instr_text(const WstVmInstr *ins, char *buf, size_t cap);
 
 /**
  * Execute one decoded instruction, moving pc past it.

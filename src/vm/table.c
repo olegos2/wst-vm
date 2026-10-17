@@ -9,7 +9,7 @@ const WstVmSyscallHandler vm_syscalls[WST_VM_SYSCALL_COUNT] = {
     [WST_VM_SYS_WRITE] = vm_sys_write,
 };
 
-const WstVmInstrDesc wst_vm_op_table[WST_VM_OPCODE_COUNT] = {
+const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES] = {
     [WST_VM_HLT]      = { "hlt",      WST_VM_INSTR_FORMAT_I,
                           WST_VM_OPND_IMM,
                           WST_VM_OPND_NONE, vm_exec_hlt, 1 },

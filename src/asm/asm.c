@@ -172,8 +172,8 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
         /* Memory immediates count in access-size units. */
         unsigned scale = wst_vm_op_table[(unsigned)(word & 0x7Fu)].imm_scale;
         if (target % scale != 0) {
-            LOG_E("line %zu: '%s' address not %u-aligned",
-                    fix->lineno, fix->name, scale);
+            LOG_E("line %zu: address of '%s' is not %u-aligned",
+                  fix->lineno, fix->name, scale);
             return false;
         }
         target /= scale;

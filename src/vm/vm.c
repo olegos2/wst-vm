@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,7 +40,8 @@ static size_t vm_stack_size(const WstVmContext *ctx)
 static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 {
     if (size > ctx->mem_size || addr > (uint64_t)ctx->mem_size - size) {
-        LOG_E("address %" PRIu64 " past address space end", addr);
+        LOG_E("address 0x%08" PRIx64 " past mem end 0x%08zx",
+              addr, ctx->mem_size);
         exit(EXIT_FAILURE);
     }
 }
@@ -50,7 +52,7 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
     { \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
         if (addr % ((bits) / 8) != 0) { \
-            LOG_E("misaligned address %" PRIu64, addr); \
+            LOG_E("misaligned " #bits "-bit access at 0x%08" PRIx64, addr); \
             exit(EXIT_FAILURE); \
         } \
         return *(U(bits) *)&ctx->mem[(size_t)addr]; \
@@ -60,7 +62,7 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
     { \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
         if (addr % ((bits) / 8) != 0) { \
-            LOG_E("misaligned address %" PRIu64, addr); \
+            LOG_E("misaligned " #bits "-bit access at 0x%08" PRIx64, addr); \
             exit(EXIT_FAILURE); \
         } \
         *(U(bits) *)&ctx->mem[(size_t)addr] = value; \
@@ -74,11 +76,11 @@ void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
     uint64_t sp = R_SP;
 
     if (sp % 8 != 0) {
-        LOG_E("misaligned sp %" PRIu64 " at pc %zu", sp, pc);
+        LOG_E("misaligned sp 0x%08" PRIx64 " at pc 0x%08zx", sp, pc);
         exit(EXIT_FAILURE);
     }
     if (sp < (uint64_t)ctx->stack.base + 8 || sp > (uint64_t)ctx->stack.top) {
-        LOG_E("stack overflow at pc %zu", pc);
+        LOG_E("stack overflow sp 0x%08" PRIx64 " at pc 0x%08zx", sp, pc);
         exit(EXIT_FAILURE);
     }
 
@@ -91,11 +93,11 @@ uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
     uint64_t sp = R_SP;
 
     if (sp % 8 != 0) {
-        LOG_E("misaligned sp %" PRIu64 " at pc %zu", sp, pc);
+        LOG_E("misaligned sp 0x%08" PRIx64 " at pc 0x%08zx", sp, pc);
         exit(EXIT_FAILURE);
     }
     if (sp >= (uint64_t)ctx->stack.top || sp < (uint64_t)ctx->stack.base) {
-        LOG_E("stack underflow at pc %zu", pc);
+        LOG_E("stack underflow sp 0x%08" PRIx64 " at pc 0x%08zx", sp, pc);
         exit(EXIT_FAILURE);
     }
 
@@ -131,14 +133,14 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
     size_t top = limit & ~(size_t)7;
     size_t stack_size = vm_stack_size(ctx);
     if (stack_size > top) {
-        LOG_E("stack of %zu bytes past address space end", stack_size);
+        LOG_E("stack of 0x%08zx bytes past mem end 0x%08zx", stack_size, top);
         return false;
     }
     stack_size = (stack_size + 7) & ~(size_t)7;
 
     uint8_t *mem = calloc(limit, sizeof(uint8_t));
     if (mem == NULL) {
-        LOG_E("cannot reserve %zu bytes", limit);
+        LOG_E("cannot reserve 0x%08zx bytes", limit);
         return false;
     }
 
@@ -173,30 +175,14 @@ void wst_vm_context_free(WstVmContext *ctx)
     ctx->stack.top = 0;
 }
 
-bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
+bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins)
 {
-    assert(vm != NULL);
-    assert(ctx != NULL);
     assert(ins != NULL);
-
-    if (vm->pc % 4 != 0) {
-        LOG_E("misaligned pc %zu", vm->pc);
-        return false;
-    }
-
-    if (vm->pc >= ctx->mem_size || ctx->mem_size - vm->pc < 4) {
-        LOG_E("pc %zu past program end %zu", vm->pc, ctx->mem_size);
-        return false;
-    }
-
-    /* Fetch never grows memory, past-end is a decode error (checked above).
-     * `pc` is 4-aligned here, so this is an aligned dereference. */
-    uint32_t word = *(const uint32_t *)&ctx->mem[vm->pc];
 
     WstVmOp op = (WstVmOp)(word & 0x7Fu);
     const WstVmInstrDesc *desc = &wst_vm_op_table[(unsigned)op];
     if (desc->format == WST_VM_INSTR_FORMAT_INVALID) {
-        LOG_E("unknown opcode 0x%02x at pc %zu", (unsigned)op, vm->pc);
+        LOG_E("unknown opcode 0x%02x at 0x%08zx", (unsigned)op, addr);
         return false;
     }
 
@@ -205,7 +191,7 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
     ins->rs1 = 0;
     ins->rs2 = 0;
     ins->imm = 0;
-    ins->addr = vm->pc;
+    ins->addr = addr;
 
     switch (desc->format) {
     case WST_VM_INSTR_FORMAT_R:
@@ -236,12 +222,96 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
         break;
     }
 
-    if (desc->format == WST_VM_INSTR_FORMAT_I || desc->format == WST_VM_INSTR_FORMAT_S ||
-        desc->format == WST_VM_INSTR_FORMAT_B || desc->format == WST_VM_INSTR_FORMAT_J ||
-        desc->format == WST_VM_INSTR_FORMAT_U)
-        LOG_V("pc %zu: %s %" PRId64 , vm->pc, desc->mnemonic, ins->imm);
-    else
-        LOG_V("pc %zu: %s", vm->pc, desc->mnemonic);
+    return true;
+}
+
+/* Append text to the output buffer. */
+static bool vm_text_put(const char *text, char *buf, size_t cap,
+                        size_t *len_inout)
+{
+    int n = snprintf(buf + *len_inout, cap - *len_inout, "%s", text);
+    if (n < 0 || (size_t)n >= cap - *len_inout)
+        return false;
+
+    *len_inout += (size_t)n;
+    return true;
+}
+
+bool wst_vm_instr_text(const WstVmInstr *ins, char *buf, size_t cap)
+{
+    assert(ins != NULL);
+    assert(buf != NULL);
+
+    if (cap == 0)
+        return false;
+    buf[0] = '\0';
+
+    const WstVmInstrDesc *desc = &wst_vm_op_table[(unsigned)ins->op];
+    if (desc->mnemonic == NULL)
+        return false;
+
+    size_t len = 0;
+    if (!vm_text_put(desc->mnemonic, buf, cap, &len))
+        return false;
+
+    bool first = true;
+
+    for (unsigned slot = WST_VM_OPND_RD; slot <= WST_VM_OPND_IMM; slot <<= 1) {
+        if ((desc->operands & slot) == 0)
+            continue;
+
+        if (!vm_text_put(first ? " " : ", ", buf, cap, &len))
+            return false;
+        first = false;
+
+        if (slot == WST_VM_OPND_IMM) {
+            int n = snprintf(buf + len, cap - len, "%" PRId64, ins->imm);
+            if (n < 0 || (size_t)n >= cap - len)
+                return false;
+            len += (size_t)n;
+            continue;
+        }
+
+        unsigned reg = slot == WST_VM_OPND_RD ? ins->rd :
+                       slot == WST_VM_OPND_RS1 ? ins->rs1 : ins->rs2;
+        char rname[4] = { (char)(((desc->fregs & slot) != 0) ? 'f' : 'x'),
+                          (char)('0' + reg), '\0' };
+        if (!vm_text_put(rname, buf, cap, &len))
+            return false;
+    }
+
+    return true;
+}
+
+bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
+{
+    assert(vm != NULL);
+    assert(ctx != NULL);
+    assert(ins != NULL);
+
+    if (vm->pc % 4 != 0) {
+        LOG_E("misaligned pc 0x%08zx", vm->pc);
+        return false;
+    }
+
+    if (vm->pc >= ctx->mem_size || ctx->mem_size - vm->pc < 4) {
+        LOG_E("pc 0x%08zx past mem end 0x%08zx", vm->pc, ctx->mem_size);
+        return false;
+    }
+
+    /* Fetch never grows memory, past-end is a decode error (checked above).
+     * `pc` is 4-aligned here, so this is an aligned dereference. */
+    uint32_t word = *(const uint32_t *)&ctx->mem[vm->pc];
+
+    if (!wst_vm_decode_word(word, vm->pc, ins))
+        return false;
+
+#ifdef WST_DEBUG
+    char text[WST_VM_INSTR_TEXT_CAP] = { 0 };
+    if (wst_vm_instr_text(ins, text, sizeof(text)))
+        LOG_V("0x%08zx  %s", vm->pc, text);
+#endif
+
     return true;
 }
 

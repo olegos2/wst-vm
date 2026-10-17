@@ -5,7 +5,6 @@ toys_asm_lib = static_library(
         'sym.c',
         'instr.c',
         'data.c',
-        'disasm.c',
     ),
     include_directories: [
         inc,

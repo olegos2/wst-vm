@@ -166,7 +166,7 @@ static bool asm_data_int(AsmCtx *ctx, const char *type, const char *val,
         nbytes >= 8 ? ULLONG_MAX : ((1ULL << (8 * nbytes)) - 1);
 
     if (!asm_data_num(val, &num) || num > limit) {
-        LOG_E("line %zu: bad %s value", lineno, type);
+        LOG_E("line %zu: bad %s value '%s'", lineno, type, val);
         return false;
     }
 
@@ -225,7 +225,7 @@ bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
 
         double num = 0;
         if (!asm_data_double(val, &num)) {
-            LOG_E("line %zu: bad f64 value", lineno);
+            LOG_E("line %zu: bad f64 value '%s'", lineno, val);
             return false;
         }
 

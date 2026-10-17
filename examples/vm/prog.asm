@@ -1,7 +1,6 @@
 
 # Example asm program, exercises every opcode.
 # Reads one integer and one double from stdin.
-# Build with: asm prog.asm prog.bin
 
 # About ABI conventions:
 # x0 is zero, x1-x3 take params with the return value in x1,

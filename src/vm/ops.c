@@ -120,15 +120,19 @@ static void vm_stdin_line(char *buf, size_t pc)
 
     fflush(stdout);
     if (fgets(buf, VM_STDIN_LINE_CAP, stdin) == NULL) {
-        LOG_E("stdin eof at pc %zu", pc);
+        LOG_E("stdin eof at pc 0x%08zx", pc);
         exit(EXIT_FAILURE);
     }
 
     size_t len = strlen(buf);
     if (len > 0 && buf[len - 1] != '\n' && !feof(stdin)) {
-        LOG_E("stdin line too long at pc %zu", pc);
+        LOG_E("stdin line over %zu bytes at pc 0x%08zx",
+              VM_STDIN_LINE_CAP - 1, pc);
         exit(EXIT_FAILURE);
     }
+
+    if (len > 0 && buf[len - 1] == '\n')
+        buf[len - 1] = '\0';
 }
 
 /* Trailing whitespace after the parsed number is fine, the rest is not. */
@@ -175,7 +179,7 @@ void vm_exec_ini(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     errno = 0;
     long long val = strtoll(buf, &end, 0);
     if (errno != 0 || !vm_parse_end(buf, end)) {
-        LOG_E("bad integer on stdin at pc %zu", ins->addr);
+        LOG_E("bad integer '%s' on stdin at pc 0x%08zx", buf, ins->addr);
         exit(EXIT_FAILURE);
     }
     VM_REG_WRITE(vm, ins->rd, (uint64_t)val);
@@ -192,7 +196,7 @@ void vm_exec_inf(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     errno = 0;
     double val = strtod(buf, &end);
     if (errno != 0 || !vm_parse_end(buf, end)) {
-        LOG_E("bad double on stdin at pc %zu", ins->addr);
+        LOG_E("bad double '%s' on stdin at pc 0x%08zx", buf, ins->addr);
         exit(EXIT_FAILURE);
     }
     vm->fp[ins->rd] = val;
@@ -274,7 +278,8 @@ void vm_exec_jalr(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     uint64_t target = (VM_REG_READ(vm, ins->rs1) + (uint64_t)ins->imm) & ~(uint64_t)1u;
     VM_REG_WRITE(vm, ins->rd, (uint64_t)(ins->addr + 4));
     if (target % 4 != 0) {
-        LOG_E("misaligned jalr target %" PRIu64 " at pc %zu", target, ins->addr);
+        LOG_E("misaligned jalr target 0x%08" PRIx64 " at pc 0x%08zx",
+              target, ins->addr);
         exit(EXIT_FAILURE);
     }
     vm->pc = (size_t)target;
@@ -374,16 +379,18 @@ void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
     uint64_t len = ECALL_ARG2;
 
     if (fd != 1 && fd != 2) {
-        LOG_E("ecall write to fd %" PRIu64 " at pc %zu", fd, addr);
+        LOG_E("ecall write to fd %" PRIu64 " at pc 0x%08zx", fd, addr);
         exit(EXIT_FAILURE);
     }
 
     if (len > ctx->mem_size || buf > ctx->mem_size - len) {
-        LOG_E("ecall write past address space end at pc %zu", addr);
+        LOG_E("ecall write of 0x%08" PRIx64 " bytes at 0x%08" PRIx64
+              " past mem end 0x%08zx at pc 0x%08zx",
+              len, buf, ctx->mem_size, addr);
         exit(EXIT_FAILURE);
     }
 
-    /* Flush our own buffered output first, or `write` leapfrogs it. */
+    /* Flush our own buffered output first, or `write` breaks it. */
     fflush(stdout);
 
     ssize_t done = write((int)fd, &ctx->mem[(size_t)buf], (size_t)len);
@@ -398,7 +405,7 @@ void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     WstVmSyscallHandler handler =
         num < WST_VM_SYSCALL_COUNT ? vm_syscalls[(size_t)num] : NULL;
     if (handler == NULL) {
-        LOG_E("unknown syscall %" PRIu64 " at pc %zu", num, ins->addr);
+        LOG_E("unknown syscall %" PRIu64 " at pc 0x%08zx", num, ins->addr);
         exit(EXIT_FAILURE);
     }
 
@@ -415,7 +422,8 @@ void vm_exec_ret(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t target = vm_stack_pop64(vm, ctx, ins->addr);
     if (target % 4 != 0) {
-        LOG_E("misaligned ret target %" PRIu64 , target);
+        LOG_E("misaligned ret target 0x%08" PRIx64 " at pc 0x%08zx",
+              target, ins->addr);
         exit(EXIT_FAILURE);
     }
     vm->pc = (size_t)target;

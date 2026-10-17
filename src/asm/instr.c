@@ -25,7 +25,7 @@ static const WstVmInstrDesc *asm_find_op_n(const char *name, size_t n)
 {
     assert(name != NULL);
 
-    for (unsigned i = 0; i < WST_VM_OPCODE_COUNT; i++) {
+    for (unsigned i = 0; i < WST_VM_NUM_OPCODES; i++) {
         const WstVmInstrDesc *desc = &wst_vm_op_table[i];
         if (desc->format != WST_VM_INSTR_FORMAT_INVALID &&
             desc->mnemonic != NULL &&
@@ -41,7 +41,7 @@ static unsigned asm_opcode(const WstVmInstrDesc *desc)
 {
     assert(desc != NULL);
     assert(desc >= wst_vm_op_table);
-    assert(desc < wst_vm_op_table + WST_VM_OPCODE_COUNT);
+    assert(desc < wst_vm_op_table + WST_VM_NUM_OPCODES);
 
     return (unsigned)(desc - wst_vm_op_table);
 }
