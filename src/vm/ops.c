@@ -413,6 +413,14 @@ void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)
     ECALL_RET = (uint64_t)done;
 }
 
+void vm_sys_flush(WstVm *vm, WstVmContext *ctx, size_t addr)
+{
+    (void)ctx;
+    (void)addr;
+
+    ECALL_RET = 0;
+}
+
 void vm_exec_ecall(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     uint64_t num = ECALL_NUM;

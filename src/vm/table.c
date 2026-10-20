@@ -5,8 +5,9 @@
 
 
 const WstVmSyscallHandler vm_syscalls[WST_VM_SYSCALL_COUNT] = {
-    [WST_VM_SYS_EXIT] = vm_sys_exit,
+    [WST_VM_SYS_EXIT]  = vm_sys_exit,
     [WST_VM_SYS_WRITE] = vm_sys_write,
+    [WST_VM_SYS_FLUSH] = vm_sys_flush,
 };
 
 const WstVmInstrFormatDesc wst_vm_format_table[WST_VM_INSTR_FORMAT_COUNT] = {

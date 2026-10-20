@@ -12,10 +12,25 @@
 #define WST_VM_MEM_DEFAULT_MAX ((size_t)256 * 1024 * 1024)
 
 /**
- * Default initial stack size.
- * Allocated after the program image on load, see `WstVmContext`.
+ * Default stack region size at the top of guest memory.
  */
 #define WST_VM_STACK_DEFAULT_SIZE ((size_t)64 * 1024)
+
+/**
+ * Largest framebuffer dimensions the vm places.
+ */
+#define WST_VM_FB_MAX_WIDTH 640
+#define WST_VM_FB_MAX_HEIGHT 480
+
+/**
+ * Firmware configuration magic, "WSTF".
+ */
+#define WST_VM_CONFIG_MAGIC 0x57535446u
+
+/**
+ * Firmware configuration version.
+ */
+#define WST_VM_CONFIG_VERSION 1u
 
 /**
  * Stack pointer register. Roles: `x0` is zero, `x1`-`x3` take params
@@ -115,12 +130,13 @@ typedef enum {
 typedef enum {
     WST_VM_SYS_EXIT  = 0,   /* exit with code from x2 */
     WST_VM_SYS_WRITE = 1,   /* write x4 bytes from x3 to fd x2, count back in x1 */
+    WST_VM_SYS_FLUSH = 2,   /* yield for a host frame, 0 in x1 */
 } WstVmSyscall;
 
 /**
  * Syscall table size, entries past the last named call stay NULL.
  */
-#define WST_VM_SYSCALL_COUNT 2
+#define WST_VM_SYSCALL_COUNT 128
 
 /**
  * Instruction formats, fixed 4-byte words with 7-bit opcode.
@@ -205,6 +221,16 @@ typedef struct WstVm {
 } WstVm;
 
 /**
+ * Result of one execution step.
+ */
+typedef enum {
+    /** Instruction finished, keep running. */
+    WST_VM_RUN_CONTINUE = 0,
+    /** Guest asked the host for a frame with `flush`. */
+    WST_VM_RUN_FLUSH,
+} WstVmRet;
+
+/**
  * Value stack at the top of guest RAM, growing down.
  *
  * `size` is taken on load, zero means `WST_VM_STACK_DEFAULT_SIZE`.
@@ -221,6 +247,44 @@ typedef struct {
 } WstVmStack;
 
 /**
+ * Guest pixel formats.
+ */
+typedef enum {
+    /** Four bytes per pixel in R, G, B, A order, raylib RGBA8. */
+    WST_VM_FB_FORMAT_RGBA8888 = 1,
+} WstVmFbFormat;
+
+/**
+ * Firmware configuration copied into guest memory on load.
+ *
+ * The guest gets its address in `x1` at entry. `fb_width` and
+ * `fb_height` are zero when the framebuffer is off, `fb_addr` points
+ * at the first pixel and `fb_stride` is the byte distance between
+ * rows. `mem_size` covers the whole reservation, `stack_top` is the
+ * first byte above the stack.
+ */
+typedef struct {
+    /** `WST_VM_CONFIG_MAGIC`. */
+    uint32_t magic;
+    /** `WST_VM_CONFIG_VERSION`. */
+    uint32_t version;
+    /** Framebuffer width in pixels. */
+    uint32_t fb_width;
+    /** Framebuffer height in pixels. */
+    uint32_t fb_height;
+    /** Guest address of the first pixel. */
+    uint64_t fb_addr;
+    /** Bytes per framebuffer row. */
+    uint32_t fb_stride;
+    /** Pixel format, a `WstVmFbFormat`. */
+    uint32_t fb_format;
+    /** Whole guest memory reservation in bytes. */
+    uint64_t mem_size;
+    /** First byte above the stack. */
+    uint64_t stack_top;
+} WstVmConfig;
+
+/**
  * Vm context that owns guest physical memory.
  *
  * `mem` is reserved once on load with `calloc`, never expanded.
@@ -228,13 +292,22 @@ typedef struct {
  * `WST_VM_MEM_DEFAULT_MAX`, set it before `wst_vm_context_load`
  * to override. Every load/store/fetch past the reservation is fatal.
  *
- * After load user should update stack pointer to `ctx.stack.top`.
+ * `config` describes the firmware handoff. Set `config.fb_width`,
+ * `config.fb_height` and `config.fb_format` before load to place a
+ * framebuffer, zero width and height keep it off. Load fills the
+ * remaining fields, copies the struct into guest memory at
+ * `config_addr` and places it below the framebuffer.
+ *
+ * After load set `pc` to `entry`, sp to `stack.top` and `x1` to
+ * `config_addr`.
  */
 typedef struct WstVmContext {
     uint8_t *mem;
     size_t mem_size;
     size_t entry;
     size_t mem_max;
+    WstVmConfig config;
+    size_t config_addr;
     WstVmStack stack;
 } WstVmContext;
 
@@ -281,7 +354,11 @@ bool wst_vm_init(WstVm *vm);
 
 /**
  * Load program file into a fresh address space with the stack
- * on top of RAM.
+ * on top of RAM and the firmware config below it.
+ *
+ * Honors `mem_max`, `stack.size` and the framebuffer request in
+ * `ctx->config`, then fills `config_addr`, `config` and the stack
+ * range. The guest should start with `x1` set to `config_addr`.
  *
  * @return `true` on success, `false` otherwise.
  */
@@ -319,8 +396,10 @@ bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
 /**
  * Execute one decoded instruction, moving pc past it.
  * Stack errors, bad memory and `hlt` are fatal.
+ *
+ * @return request to caller on how to continue execution.
  */
-void wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
+WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
 
 /**
  * Reset program counter. Safe on zero state.

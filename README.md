@@ -8,6 +8,7 @@ ISA, registers, syscalls and assembly syntax: [docs/isa.md](docs/isa.md).
 ## What you need
 
 - A C compiler, `meson >= 1.1.0`, `ninja`
+- `raylib` for the vm framebuffer window
 
 ## How to build
 
@@ -23,4 +24,11 @@ Depends on `wst-toys` subproject.
 ```sh
 ./builddir/examples/asm/asm examples/vm/prog.asm prog.bin
 ./builddir/examples/vm/vm prog.bin
+```
+
+Framebuffer window:
+
+```sh
+./builddir/examples/asm/asm examples/vm/circle.asm circle.bin
+./builddir/examples/vm/vm --fb circle.bin
 ```

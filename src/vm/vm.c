@@ -37,6 +37,54 @@ static size_t vm_stack_size(const WstVmContext *ctx)
     return ctx->stack.size != 0 ? ctx->stack.size : WST_VM_STACK_DEFAULT_SIZE;
 }
 
+/* Round `addr` down to a multiple of `align`, a power of two. */
+static size_t vm_align_down(size_t addr, size_t align)
+{
+    assert(align != 0 && (align & (align - 1)) == 0);
+
+    return addr & ~(align - 1);
+}
+
+/* Validate the framebuffer request and place it below `stack_base`. */
+static bool vm_fb_layout(WstVmConfig *config, size_t stack_base)
+{
+    assert(config != NULL);
+
+    if (config->fb_width == 0 && config->fb_height == 0) {
+        config->fb_addr = 0;
+        config->fb_stride = 0;
+        config->fb_format = 0;
+        return true;
+    }
+
+    if (config->fb_width == 0 || config->fb_height == 0) {
+        LOG_E("fb needs both width and height");
+        return false;
+    }
+    if (config->fb_width > WST_VM_FB_MAX_WIDTH ||
+        config->fb_height > WST_VM_FB_MAX_HEIGHT) {
+        LOG_E("fb %" PRIu32 "x%" PRIu32 " past %dx%d",
+              config->fb_width, config->fb_height,
+              WST_VM_FB_MAX_WIDTH, WST_VM_FB_MAX_HEIGHT);
+        return false;
+    }
+    if (config->fb_format != (uint32_t)WST_VM_FB_FORMAT_RGBA8888) {
+        LOG_E("unsupported fb format %" PRIu32, config->fb_format);
+        return false;
+    }
+
+    size_t stride = (size_t)config->fb_width * 4;
+    size_t size = stride * config->fb_height;
+    if (size > stack_base || sizeof(*config) > stack_base - size) {
+        LOG_E("fb of 0x%08zx bytes past stack", size);
+        return false;
+    }
+
+    config->fb_stride = (uint32_t)stride;
+    config->fb_addr = (uint64_t)vm_align_down(stack_base - size, 8);
+    return true;
+}
+
 static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 {
     if (size > ctx->mem_size || addr > (uint64_t)ctx->mem_size - size) {
@@ -126,6 +174,7 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
     ctx->mem = NULL;
     ctx->mem_size = 0;
     ctx->entry = 0;
+    ctx->config_addr = 0;
     ctx->stack.base = 0;
     ctx->stack.top = 0;
 
@@ -138,6 +187,19 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
     }
     stack_size = (stack_size + 7) & ~(size_t)7;
 
+    size_t base = top - stack_size;
+    if (!vm_fb_layout(&ctx->config, base))
+        return false;
+
+    size_t config_addr = base;
+    if (ctx->config.fb_addr != 0)
+        config_addr = (size_t)ctx->config.fb_addr;
+    if (config_addr < sizeof(ctx->config)) {
+        LOG_E("no room for firmware config below stack");
+        return false;
+    }
+    config_addr = vm_align_down(config_addr - sizeof(ctx->config), 8);
+
     uint8_t *mem = calloc(limit, sizeof(uint8_t));
     if (mem == NULL) {
         LOG_E("cannot reserve 0x%08zx bytes", limit);
@@ -148,17 +210,29 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
     assert(((uintptr_t)mem & 7u) == 0);
 
     size_t entry = 0;
-    size_t base = top - stack_size;
-    if (!wst_prog_load(mem, base, &entry, path)) {
+    if (!wst_prog_load(mem, config_addr, &entry, path)) {
         free(mem);
         return false;
     }
 
+    ctx->config.magic = WST_VM_CONFIG_MAGIC;
+    ctx->config.version = WST_VM_CONFIG_VERSION;
+    ctx->config.mem_size = (uint64_t)limit;
+    ctx->config.stack_top = (uint64_t)top;
+    memcpy(&mem[config_addr], &ctx->config, sizeof(ctx->config));
+
     ctx->mem = mem;
     ctx->mem_size = limit;
     ctx->entry = entry;
+    ctx->config_addr = config_addr;
     ctx->stack.base = base;
     ctx->stack.top = top;
+
+    if (ctx->config.fb_addr != 0) {
+        LOG_I("fb %" PRIu32 "x%" PRIu32 " at 0x%08" PRIx64,
+              ctx->config.fb_width, ctx->config.fb_height,
+              ctx->config.fb_addr);
+    }
     return true;
 }
 
@@ -171,6 +245,7 @@ void wst_vm_context_free(WstVmContext *ctx)
     ctx->mem = NULL;
     ctx->mem_size = 0;
     ctx->entry = 0;
+    ctx->config_addr = 0;
     ctx->stack.base = 0;
     ctx->stack.top = 0;
 }
@@ -314,7 +389,7 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
     return true;
 }
 
-void wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     assert(vm != NULL);
     assert(ctx != NULL);
@@ -324,8 +399,14 @@ void wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     WstVmInstrHandler handler = wst_vm_op_table[(unsigned)ins->op].handler;
     assert(handler != NULL);
 
+    /* Flush is the frame boundary, report it after the call. */
+    bool flush = ins->op == WST_VM_ECALL &&
+                 ECALL_NUM == WST_VM_SYS_FLUSH;
+
     vm->pc = ins->addr + WST_VM_INSTR_SIZE;
     handler(vm, ctx, ins);
+
+    return flush ? WST_VM_RUN_FLUSH : WST_VM_RUN_CONTINUE;
 }
 
 void wst_vm_close(WstVm *vm)

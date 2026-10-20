@@ -2,6 +2,7 @@
 #include "toys/debug.h"
 #include "toys/vm.h"
 
+#include <raylib.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,13 @@
 #define VM_DEFAULT_MEM_MB ((int)(WST_VM_MEM_DEFAULT_MAX / (1024 * 1024)))
 #define VM_DEFAULT_STACK_KB ((int)(WST_VM_STACK_DEFAULT_SIZE / 1024))
 
+/* Default framebuffer size in pixels. */
+#define VM_DEFAULT_FB_WIDTH 320
+#define VM_DEFAULT_FB_HEIGHT 240
+
+/* Fallback frame rate when the monitor reports none. */
+#define VM_FB_DEFAULT_FPS 60
+
 static WstVm vm;
 static WstVmContext ctx;
 
@@ -21,12 +29,71 @@ static void vm_cleanup(void)
     wst_vm_context_free(&ctx);
 }
 
+/* Run guest instructions until it asks for the next frame. */
+static bool vm_run_until_flush(WstVm *machine, WstVmContext *context)
+{
+    for (;;) {
+        WstVmInstr instr = { 0 };
+        if (!wst_vm_decode(machine, context, &instr))
+            return false;
+        if (wst_vm_execute(machine, context, &instr) == WST_VM_RUN_FLUSH)
+            return true;
+    }
+}
+
+/* Show the guest framebuffer in a raylib window until it closes. */
+static int run_fb(WstVm *machine, WstVmContext *context)
+{
+    int width = (int)context->config.fb_width;
+    int height = (int)context->config.fb_height;
+    uint8_t *pixels = context->mem + (size_t)context->config.fb_addr;
+
+    InitWindow(width, height, "wst-vm");
+    if (!IsWindowReady()) {
+        LOG_E("cannot open fb window");
+        return EXIT_FAILURE;
+    }
+
+    Image image = {
+        .data = pixels,
+        .width = width,
+        .height = height,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    };
+    Texture2D texture = LoadTextureFromImage(image);
+
+    int refresh = GetMonitorRefreshRate(GetCurrentMonitor());
+    /* Pseudo vsync, EndDrawing waits for the next frame slot. */
+    SetTargetFPS(refresh > 0 ? refresh : VM_FB_DEFAULT_FPS);
+
+    bool ok = true;
+    while (!WindowShouldClose()) {
+        if (!vm_run_until_flush(machine, context)) {
+            ok = false;
+            break;
+        }
+        UpdateTexture(texture, pixels);
+        BeginDrawing();
+        ClearBackground(BLACK);
+        DrawTexture(texture, 0, 0, WHITE);
+        EndDrawing();
+    }
+
+    UnloadTexture(texture);
+    CloseWindow();
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 int main(int argc, char **argv)
 {
     bool help = false;
     bool verbose = false;
+    bool fb = false;
     int mem_mb = 0;
     int stack_kb = 0;
+    int fb_width = 0;
+    int fb_height = 0;
     const char *prog_path = NULL;
 
     ArgOption opts[] = {
@@ -57,6 +124,24 @@ int main(int argc, char **argv)
             .dest = &stack_kb,
             .long_name = "--stack-size",
             .description = "stack size in KiB (default 64)",
+        },
+        {
+            .type = ARG_SWITCH,
+            .dest = &fb,
+            .long_name = "--fb",
+            .description = "enable framebuffer window",
+        },
+        {
+            .type = ARG_INT,
+            .dest = &fb_width,
+            .long_name = "--fb-width",
+            .description = "framebuffer width (default 320, max 640)",
+        },
+        {
+            .type = ARG_INT,
+            .dest = &fb_height,
+            .long_name = "--fb-height",
+            .description = "framebuffer height (default 240, max 480)",
         },
         {
             .type = ARG_POSITIONAL,
@@ -97,6 +182,23 @@ int main(int argc, char **argv)
         mem_mb = VM_DEFAULT_MEM_MB;
     if (stack_kb == 0)
         stack_kb = VM_DEFAULT_STACK_KB;
+    if (fb_width == 0)
+        fb_width = VM_DEFAULT_FB_WIDTH;
+    if (fb_height == 0)
+        fb_height = VM_DEFAULT_FB_HEIGHT;
+
+    if (fb) {
+        if (fb_width < 1 || fb_height < 1 ||
+            fb_width > WST_VM_FB_MAX_WIDTH ||
+            fb_height > WST_VM_FB_MAX_HEIGHT) {
+            fprintf(stderr, "fb size must be 1..%dx%d\n",
+                    WST_VM_FB_MAX_WIDTH, WST_VM_FB_MAX_HEIGHT);
+            return EXIT_FAILURE;
+        }
+        ctx.config.fb_width = (uint32_t)fb_width;
+        ctx.config.fb_height = (uint32_t)fb_height;
+        ctx.config.fb_format = WST_VM_FB_FORMAT_RGBA8888;
+    }
 
     ctx.mem_max = (size_t)mem_mb * 1024 * 1024;
     ctx.stack.size = (size_t)stack_kb * 1024;
@@ -109,11 +211,17 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     vm.pc = ctx.entry;
     vm.regs[WST_VM_REG_SP] = (uint64_t)ctx.stack.top;
+    /* Boot handoff, x1 points at the firmware config. */
+    vm.regs[1] = (uint64_t)ctx.config_addr;
+
+    if (ctx.config.fb_addr != 0)
+        return run_fb(&vm, &ctx);
 
     WstVmInstr instr = { 0 };
     while (1) {
         if (!wst_vm_decode(&vm, &ctx, &instr))
             return EXIT_FAILURE;
-        wst_vm_execute(&vm, &ctx, &instr);
+        /* Headless, there is no frame to present. */
+        (void)wst_vm_execute(&vm, &ctx, &instr);
     }
 }

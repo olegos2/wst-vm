@@ -111,6 +111,7 @@ OP(ret);
 
 ECALL(exit);
 ECALL(write);
+ECALL(flush);
 
 #undef ECALL
 

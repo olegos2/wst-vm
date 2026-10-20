@@ -3,6 +3,9 @@
 Small virtual machine with fixed 4 byte instructions. It mimics layouts
 and naming from RISC-V but simplified. No flags and no SIMD yet.
 
+Machine memory layout and boot state are in
+[memory-map](memory-map.md).
+
 ## Registers
 
 Eight 64 bit integer registers named `x0` to `x7`. Register `x0` always
@@ -25,7 +28,11 @@ Odd targets trap instead of running garbage.
 | `x4`     | —             | callee           | —              |
 | `x5`     | —             | callee           | —              |
 | `x6`     | —             | caller           | return address |
-| `x7`     | `sp`          | callee           | stack pointer  |
+| `x7`     | —             | callee           | `sp`, stack pointer  |
+
+RISC-V has no dedicated stack ops either: `sp` plus `ld`/`st`/`addi`
+is the convention there too. Our `pushqr`/`pushqv`/`popqr`/`popqv`
+plus `call`/`ret` are conveniences over the same idea.
 
 ## Instruction word
 
@@ -124,7 +131,8 @@ All integer arithmetic wraps modulo 2^64.
 | `0x38` | `auipc`  | U      | `rd`  `imm`       | `R[rd] := PC + (imm << 12)`                       | add upper immediate to pc |
 
 Loads read from base register plus offset scaled to access size units,
-stores write the same way. Unaligned addresses trap.
+stores write the same way. Unaligned addresses trap. Address arithmetic
+wraps modulo 2^64, so negative offsets address below the base.
 
 `ini`/`inf` read one stdin line each (decimal or hex integers for `ini`,
 doubles for `inf`, surrounding whitespace is fine). Output is flushed
@@ -176,34 +184,17 @@ return value is passed in `x1`.
 | ------:|:------- |:------------ | ----------- |
 |    `0` | `exit`  | code         | End the program with `code & 0xFF` |
 |    `1` | `write` | fd, buf, len | Write `len` bytes from `buf` to `fd`, return bytes written |
+|    `2` | `flush` | —            | Wait for the host to present a frame, return 0 |
 
 Write only allows standard output (`1`) and standard error (`2`).
 Other file numbers are fatal. The address range must lie inside
-the reservation. Host errors come back as they are.
+guest memory. Host errors come back as they are.
 
-## Memory
-
-One flat byte array of guest RAM for code, data and stack. It is
-reserved once on load, `mem_max` bytes, zeroed, default 256 MiB
-(`--mem-max` overrides in MiB, zero struct field means default).
-Nothing ever grows it, every load/store/fetch past the reservation
-is fatal. Code living in writable memory means self changing programs
-work with no extra effort. There is no cache to flush since nothing
-runs natively. See [memory-map](memory-map.md) for the boot layout,
-MMIO plans and the future kernel handoff.
-
-The stack is the top region of the same array, `stack_size` bytes
-(`--stack-size` in KiB, default 64). `x7` points at the first free
-slot above the top item and grows down in 8 byte steps. Overflow past
-the base, underflow past the top and misaligned `sp` are fatal.
-Pushes and pops are bounds-checked memory writes and reads, so stack
-slots are ordinary memory: `ld x3, x7, 0` peeks the top without
-popping, `ld x4, x7, 1` reads deeper. Negative offsets work because
-the address wraps modulo 2^64 (`R[x7]-8` for `-8`).
-
-RISC-V has no dedicated stack ops either: `sp` plus `ld`/`st`/`addi`
-is the convention there too. Our `pushqr`/`pushqv`/`popqr`/`popqv` plus
-`call`/`ret` are conveniences over the same idea.
+`flush` is the frame boundary for the simple framebuffer. It returns
+0 in `x1` and makes `wst_vm_execute` report `WST_VM_RUN_FLUSH`; the
+host presents a frame, then resumes execution. The vm example paces
+that presentation to the host refresh, so back-to-back flushes run
+at most once per refresh. A host without a display may ignore it.
 
 ## Program files
 
@@ -217,7 +208,7 @@ offset, target address, file size and memory size. The loader checks the whole
 file before touching memory. Magic, version, header bounds, segment bounds,
 address cap, overlapping segments and a sane aligned entry all get verified
 first. Then segments copy over and the gap between file size and memory size
-stays zero. The stack is not in the file, it lives at the top of RAM.
+stays zero.
 
 ## Assembly syntax
 
@@ -266,4 +257,7 @@ the same decode and text the interpreter uses.
 
 ## Example program
 
-See [prog.asm](examples/vm/prog.asm) example.
+See [prog.asm](examples/vm/prog.asm) for the full ISA and
+[circle.asm](examples/vm/circle.asm) for the simple framebuffer.
+The circle demo centers a 201x201 box, fills pixels with
+`dx*dx + dy*dy <= 100*100` and flushes once per frame.
