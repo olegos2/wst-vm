@@ -308,11 +308,13 @@ bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins);
 
 /**
  * Write one decoded instruction as `mnemonic operands` into `buf`.
+ * `imm_text` prints in place of the immediate when not NULL.
  * Output can be re-assembled. `WST_VM_INSTR_TEXT_CAP` always fits.
  *
  * @return `true` on success, `false` when `buf` is too small.
  */
-bool wst_vm_instr_text(const WstVmInstr *ins, char *buf, size_t cap);
+bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
+                       char *buf, size_t cap);
 
 /**
  * Execute one decoded instruction, moving pc past it.

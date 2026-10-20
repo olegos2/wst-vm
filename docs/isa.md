@@ -236,15 +236,18 @@ msg: str "hello, world!\n"
 pi: f64 3.14159
 n: u64 0x100
 w: u32 42
+blob: bytes 7f 45 4c 46
 ```
 
 - Code lines are `mnemonic operands...` with `x0`-`x7`/`f0`-`f7`
   registers and decimal or hex numbers, or a `:label` definition alone
   on a line. Labels address the start of the next instruction.
 - Data entries are `name: <type> <value>` on one line. Types are
-  `u64`/`u32` (numbers), `f64` (double) and `str "..."` with `\n`,
-  `\\`, `\"`, `\0`, `\t` escapes. `u64`/`f64` align to 8 bytes,
-  `u32` to 4, strings pack exact bytes with no NUL added.
+  `u64`/`u32` (numbers), `f64` (double), `str "..."` with `\n`,
+  `\\`, `\"`, `\0`, `\t` escapes, and `bytes` with hex pairs like
+  `01 02 ff` (spaces optional). `u64`/`f64` align to 8 bytes,
+  `u32` to 4, strings and bytes pack exact bytes with no NUL added.
+  Numbers store little-endian, `bytes` pairs are in memory order.
 - Code and data share one namespace: redefining a name is an error.
 - A `:name` operand refers to a label or a data entry. First pass
   emits words and records every `:name` as a fixup, second pass
@@ -254,11 +257,12 @@ w: u32 42
   `lui`) are absolute addresses. `lui` needs a 4096-aligned address.
   Unknown names and out-of-range immediates are errors.
 
-The disassembler (`asm --disasm`) prints the address of each word
-followed by one `mnemonic operands` line, so its output re-assembles
-to identical code bytes (data blobs are code-only: names and data do
-not survive disassembly). It uses `wst_vm_decode_word` and
-`wst_vm_instr_text`, the same decode and text the interpreter uses.
+The disassembler (`asm --disasm`, `wst_vm_disasm`) prints the whole
+code segment as assembly text, with `:_start` at the entry and
+`:label_<addr>` at branch and jump targets. It emits the data segment
+as `bytes` lines, so its output assembles back to an identical
+program file. It uses `wst_vm_decode_word` and `wst_vm_instr_text`,
+the same decode and text the interpreter uses.
 
 ## Example program
 

@@ -1,5 +1,5 @@
-# Quadratic solver. Reads a, b, c as doubles from stdin, one per line,
-# prints how many real roots the equation has and their values.
+# Solves ax^2 + bx + c = 0. Reads a, b, c as doubles from stdin,
+# one per line, prints the roots. `a == 0` makes the equation linear.
 
 # Every message has its byte count in the u64 right before the text,
 # so `print` gets the length with one negative `ld` offset.
@@ -32,7 +32,7 @@ section .text
 
     fld  f7, x0, :fp_zero
     feq  x1, f0, f7
-    bne  x1, x0, :not_quadratic
+    bne  x1, x0, :linear
 
     fmul f3, f1, f1        # b*b
     fadd f4, f0, f0        # 2a
@@ -75,8 +75,27 @@ section .text
     call :print
     hlt  0
 
-:not_quadratic
-    addi x1, x0, :msg_a_zero
+:linear
+    feq  x1, f1, f7        # b == 0 ?
+    bne  x1, x0, :constant
+
+    addi  x1, x0, :msg_linear
+    call  :print
+    fsub  f0, f7, f2       # -c
+    fdiv  f0, f0, f1       # / b
+    addi  x1, x0, :msg_x
+    call  :print_root
+    hlt   0
+
+:constant
+    feq  x1, f2, f7        # c == 0 ?
+    bne  x1, x0, :any_x
+    addi x1, x0, :msg_no_sol
+    call :print
+    hlt  0
+
+:any_x
+    addi x1, x0, :msg_any_x
     call :print
     hlt  0
 
@@ -85,17 +104,30 @@ section .data
 
     msg_intro_len:  u64 34
     msg_intro:      str "ax^2 + bx + c, a b c one per line\n"
+
     msg_two_len:    u64 9
     msg_two:        str "2 roots:\n"
+
     msg_one_len:    u64 8
     msg_one:        str "1 root:\n"
+
     msg_none_len:   u64 14
     msg_none:       str "no real roots\n"
+
     msg_x1_len:     u64 5
     msg_x1:         str "x1 = "
+
     msg_x2_len:     u64 5
     msg_x2:         str "x2 = "
+
     msg_x_len:      u64 4
     msg_x:          str "x = "
-    msg_a_zero_len: u64 18
-    msg_a_zero:     str "a must be nonzero\n"
+
+    msg_linear_len: u64 17
+    msg_linear:     str "linear equation:\n"
+
+    msg_no_sol_len: u64 12
+    msg_no_sol:     str "no solution\n"
+
+    msg_any_x_len:  u64 16
+    msg_any_x:      str "all x are roots\n"

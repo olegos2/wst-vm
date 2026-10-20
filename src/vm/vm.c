@@ -228,7 +228,8 @@ static bool vm_text_put(const char *text, char *buf, size_t cap,
     return true;
 }
 
-bool wst_vm_instr_text(const WstVmInstr *ins, char *buf, size_t cap)
+bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
+                       char *buf, size_t cap)
 {
     assert(ins != NULL);
     assert(buf != NULL);
@@ -256,6 +257,12 @@ bool wst_vm_instr_text(const WstVmInstr *ins, char *buf, size_t cap)
         first = false;
 
         if (slot == WST_VM_OPND_IMM) {
+            if (imm_text != NULL) {
+                if (!vm_text_put(imm_text, buf, cap, &len))
+                    return false;
+                continue;
+            }
+
             int n = snprintf(buf + len, cap - len, "%" PRId64, ins->imm);
             if (n < 0 || (size_t)n >= cap - len)
                 return false;
@@ -300,7 +307,7 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
 
 #ifdef WST_DEBUG
     char text[WST_VM_INSTR_TEXT_CAP] = { 0 };
-    if (wst_vm_instr_text(ins, text, sizeof(text)))
+    if (wst_vm_instr_text(ins, NULL, text, sizeof(text)))
         LOG_V("0x%08zx  %s", vm->pc, text);
 #endif
 

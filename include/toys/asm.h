@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /**
  * Assembled program before linking, code words plus data bytes.
@@ -42,8 +43,8 @@ bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out);
  * Sections, one per line, default is `.text`:
  * - `section .text`: code, `:label` definitions and instructions.
  * - `section .data`: `name: <type> <value>` entries, types are
- *   `u64`/`u32` (dec/hex int), `f64` (double) and
- *   `str "..."` (no NUL added automatically).
+ *   `u64`/`u32` (dec/hex int), `f64` (double), `str "..."` (no NUL
+ *   added automatically) and `bytes` (hex pairs).
  *   `u64`/`f64` entries align to 8, `u32` to 4.
  *
  * Line forms in `.text`: empty line, `mnemonic operands...`, `:label`.
@@ -55,5 +56,20 @@ bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out);
  * @return `true` on success, `false` on failure.
  */
 bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out);
+
+/**
+ * Write a program file as assembly text to `out`.
+ * The whole code segment is printed, `:_start` at the entry and
+ * `:label_<addr>` at branch and jump targets, then the data segment
+ * as `bytes`. Output assembles back to an identical program file.
+ * A cut by `max_words` skips the data segment.
+ *
+ * @param out stream to print to
+ * @param path program file to disassemble
+ * @param max_words code words to print, zero for all
+ *
+ * @return `true` on success, `false` on failure.
+ */
+bool wst_vm_disasm(FILE *out, const char *path, size_t max_words);
 
 #endif /* TOYS_ASM_H */

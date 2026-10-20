@@ -9,7 +9,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
@@ -42,56 +41,9 @@ static int run_disasm(const char *path, int count)
 {
     assert(path != NULL);
 
-    uint8_t *mem = calloc(WST_VM_MEM_DEFAULT_MAX, sizeof(uint8_t));
-    if (mem == NULL) {
-        LOG_E("cannot reserve 0x%08zx bytes", WST_VM_MEM_DEFAULT_MAX);
-        return EXIT_FAILURE;
-    }
-
-    size_t entry = 0;
-    if (!wst_prog_load(mem, WST_VM_MEM_DEFAULT_MAX, &entry, path)) {
-        free(mem);
-        return EXIT_FAILURE;
-    }
-
-    int ret = EXIT_SUCCESS;
-    size_t addr = entry;
-    int printed = 0;
-    while (1) {
-        if (addr >= WST_VM_MEM_DEFAULT_MAX ||
-            WST_VM_MEM_DEFAULT_MAX - addr < WST_VM_INSTR_SIZE) {
-            LOG_E("address 0x%08zx past file end", addr);
-            ret = EXIT_FAILURE;
-            break;
-        }
-
-        uint32_t word = 0;
-        memcpy(&word, &mem[addr], sizeof(word));
-
-        WstVmInstr ins = { 0 };
-        if (!wst_vm_decode_word(word, addr, &ins)) {
-            ret = EXIT_FAILURE;
-            break;
-        }
-
-        char buf[WST_VM_INSTR_TEXT_CAP] = { 0 };
-        if (!wst_vm_instr_text(&ins, buf, sizeof(buf))) {
-            ret = EXIT_FAILURE;
-            break;
-        }
-
-        printf("0x%08zx  %s\n", addr, buf);
-        printed++;
-        addr += WST_VM_INSTR_SIZE;
-
-        if (count <= 0 && ins.op == WST_VM_HLT)
-            break;
-        if (count > 0 && printed >= count)
-            break;
-    }
-
-    free(mem);
-    return ret;
+    size_t max_words = count > 0 ? (size_t)count : 0;
+    return wst_vm_disasm(stdout, path, max_words) ?
+           EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 int main(int argc, char **argv)
@@ -125,13 +77,13 @@ int main(int argc, char **argv)
             .dest = &disasm,
             .short_name = "-d",
             .long_name = "--disasm",
-            .description = "disassemble prog file instead of assembling",
+            .description = "print prog file as assembly text",
         },
         {
             .type = ARG_INT,
             .dest = &count,
             .long_name = "--count",
-            .description = "disassemble this many words (default runs to hlt)",
+            .description = "disassemble at most this many code words",
         },
         {
             .type = ARG_POSITIONAL,
