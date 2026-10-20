@@ -26,9 +26,22 @@ Depends on `wst-toys` subproject.
 ./builddir/examples/vm/vm prog.bin
 ```
 
-Framebuffer window:
+Circle drawn into software framebuffer:
 
 ```sh
 ./builddir/examples/asm/asm examples/vm/circle.asm circle.bin
 ./builddir/examples/vm/vm --fb --fb-scale 2 circle.bin
+```
+
+Mandelbulb raymarcher:
+
+```sh
+./builddir/examples/asm/asm examples/vm/mandelbulb.asm mandelbulb.bin
+./builddir/examples/vm/vm --fb --fb-width 160 --fb-height 120 --fb-scale 2 mandelbulb.bin
+```
+
+C reference for the same frame (`examples/vm/mandelbulb_ref.c`):
+
+```sh
+./builddir/examples/vm/mandelbulb_ref 160 120 mandelbulb.ppm
 ```

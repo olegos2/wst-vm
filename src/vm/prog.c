@@ -61,7 +61,7 @@ static void prog_get_seg(const WstFile *file, const WstProgHeader *hdr,
 /* Check file bounds, memory size and address cap of a single segment. */
 static bool prog_check_seg(const char *path, const WstFile *file,
                            uint64_t idx, const WstProgSegment *seg,
-                           size_t mem_max)
+                           size_t mem_size)
 {
     assert(path != NULL);
     assert(file != NULL);
@@ -79,10 +79,10 @@ static bool prog_check_seg(const char *path, const WstFile *file,
         return false;
     }
 
-    if (mem_max != 0 &&
-        (seg->memsz > mem_max || seg->vaddr > mem_max - seg->memsz)) {
+    if (mem_size != 0 &&
+        (seg->memsz > mem_size || seg->vaddr > mem_size - seg->memsz)) {
         LOG_E("'%s' segment %" PRIu64 " past mem end 0x%08zx",
-              path, idx, mem_max);
+              path, idx, mem_size);
         return false;
     }
 
@@ -121,7 +121,7 @@ static bool prog_check_overlap(const char *path, const WstFile *file,
 
 /* Validate every segment, computing the total span `vaddr + memsz`. */
 static bool prog_check_segs(const char *path, const WstFile *file,
-                            const WstProgHeader *hdr, size_t mem_max,
+                            const WstProgHeader *hdr, size_t mem_size,
                             size_t *total_out)
 {
     assert(path != NULL);
@@ -134,7 +134,7 @@ static bool prog_check_segs(const char *path, const WstFile *file,
         WstProgSegment seg = { 0 };
         prog_get_seg(file, hdr, i, &seg);
 
-        if (!prog_check_seg(path, file, i, &seg, mem_max))
+        if (!prog_check_seg(path, file, i, &seg, mem_size))
             return false;
         if (!prog_check_overlap(path, file, hdr, i, &seg))
             return false;

@@ -10,8 +10,6 @@
 
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
-/* Data section entries. */
-
 /* Append one byte to the data buffer. */
 static bool asm_data_push(AsmCtx *ctx, uint8_t byte, size_t lineno)
 {
@@ -99,7 +97,6 @@ static bool asm_data_double(const char *tok, double *num_out)
 typedef bool (*AsmDataHandler)(AsmCtx *ctx, const char *val, size_t *off_out,
                                size_t lineno);
 
-/* Data type name and its handler. */
 typedef struct {
     const char *name;
     AsmDataHandler handler;
@@ -144,6 +141,32 @@ static bool asm_data_u32(AsmCtx *ctx, const char *val, size_t *off_out,
 {
     return asm_data_int(ctx, "u32", val, (unsigned)sizeof(uint32_t),
                         off_out, lineno);
+}
+
+/* Single entry, 4-byte aligned. */
+static bool asm_data_f32(AsmCtx *ctx, const char *val, size_t *off_out,
+                         size_t lineno)
+{
+    assert(ctx != NULL);
+    assert(val != NULL);
+    assert(off_out != NULL);
+
+    if (!asm_data_align(ctx, sizeof(float), lineno))
+        return false;
+
+    double num = 0;
+    if (!asm_data_double(val, &num)) {
+        LOG_E("line %zu: bad f32 value '%s'", lineno, val);
+        return false;
+    }
+
+    union {
+        float num;
+        uint32_t bits;
+    } pun = { .num = (float)num };
+
+    *off_out = ctx->obj->data.length;
+    return asm_data_bits(ctx, pun.bits, (unsigned)sizeof(pun.bits), lineno);
 }
 
 /* Double entry, 8-byte aligned. */
@@ -280,6 +303,7 @@ static bool asm_data_bytes(AsmCtx *ctx, const char *val, size_t *off_out,
 static const AsmDataType asm_data_types[] = {
     { "u64",   asm_data_u64   },
     { "u32",   asm_data_u32   },
+    { "f32",   asm_data_f32   },
     { "f64",   asm_data_f64   },
     { "str",   asm_data_str   },
     { "bytes", asm_data_bytes },
@@ -333,8 +357,7 @@ bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno)
 
     const AsmDataType *data_type = asm_data_type_find(type);
     if (data_type == NULL) {
-        LOG_E("line %zu: unknown data type '%s' (u64, u32, f64, str, bytes)",
-              lineno, type);
+        LOG_E("line %zu: unknown data type '%s'", lineno, type);
         return false;
     }
 

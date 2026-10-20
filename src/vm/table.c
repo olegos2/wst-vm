@@ -36,6 +36,9 @@ const WstVmInstrFormatDesc wst_vm_format_table[WST_VM_INSTR_FORMAT_COUNT] = {
         .imm_shift = 10, .imm_bits = 22, .imm_signed = true,
         .pc_relative = true,
     },
+    [WST_VM_INSTR_FORMAT_R4] = {
+        .rd_shift = 7, .rs1_shift = 10, .rs2_shift = 13, .rs3_shift = 16,
+    },
 };
 
 const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES] = {
@@ -246,6 +249,182 @@ const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES] = {
     [WST_VM_FLE]      = { "fle",      WST_VM_INSTR_FORMAT_R,
                           WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
                           WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fle, 1 },
+
+    [WST_VM_LWU]      = { "lwu",      WST_VM_INSTR_FORMAT_I,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_lwu, 4 },
+
+    [WST_VM_SLT]      = { "slt",      WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_slt, 1 },
+
+    [WST_VM_SLTU]     = { "sltu",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_sltu, 1 },
+
+    [WST_VM_BLTU]     = { "bltu",     WST_VM_INSTR_FORMAT_B,
+                          WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_bltu, 1 },
+
+    [WST_VM_BGEU]     = { "bgeu",     WST_VM_INSTR_FORMAT_B,
+                          WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_bgeu, 1 },
+
+    [WST_VM_ADDW]     = { "addw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_addw, 1 },
+
+    [WST_VM_SUBW]     = { "subw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_subw, 1 },
+
+    [WST_VM_MULW]     = { "mulw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_mulw, 1 },
+
+    [WST_VM_DIVW]     = { "divw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_divw, 1 },
+
+    [WST_VM_DIVUW]    = { "divuw",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_divuw, 1 },
+
+    [WST_VM_REMW]     = { "remw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_remw, 1 },
+
+    [WST_VM_REMUW]    = { "remuw",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_remuw, 1 },
+
+    [WST_VM_SLLW]     = { "sllw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_sllw, 1 },
+
+    [WST_VM_SRLW]     = { "srlw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_srlw, 1 },
+
+    [WST_VM_SRAW]     = { "sraw",     WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_NONE, vm_exec_sraw, 1 },
+
+    [WST_VM_ADDIW]    = { "addiw",    WST_VM_INSTR_FORMAT_I,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_addiw, 1 },
+
+    [WST_VM_SLLIW]    = { "slliw",    WST_VM_INSTR_FORMAT_I,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_slliw, 1 },
+
+    [WST_VM_SRLIW]    = { "srliw",    WST_VM_INSTR_FORMAT_I,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_srliw, 1 },
+
+    [WST_VM_SRAIW]    = { "sraiw",    WST_VM_INSTR_FORMAT_I,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_NONE, vm_exec_sraiw, 1 },
+
+    [WST_VM_FLW]      = { "flw",      WST_VM_INSTR_FORMAT_I,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_RD, vm_exec_flw, 4 },
+
+    [WST_VM_FSW]      = { "fsw",      WST_VM_INSTR_FORMAT_S,
+                          WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_IMM,
+                          WST_VM_OPND_RS2, vm_exec_fsw, 4 },
+
+    [WST_VM_FCVT_S_W] = { "fcvt.s.w", WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1,
+                          WST_VM_OPND_RD, vm_exec_fcvt_s_w, 1 },
+
+    [WST_VM_FCVT_W_S] = { "fcvt.w.s", WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1,
+                          WST_VM_OPND_RS1, vm_exec_fcvt_w_s, 1 },
+
+    [WST_VM_FADD_S]   = { "fadd.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fadd_s, 1 },
+
+    [WST_VM_FSUB_S]   = { "fsub.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fsub_s, 1 },
+
+    [WST_VM_FMUL_S]   = { "fmul.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fmul_s, 1 },
+
+    [WST_VM_FDIV_S]   = { "fdiv.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fdiv_s, 1 },
+
+    [WST_VM_FSQRT_S]  = { "fsqrt.s",  WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1, vm_exec_fsqrt_s, 1 },
+
+    [WST_VM_FEQ_S]    = { "feq.s",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_feq_s, 1 },
+
+    [WST_VM_FLT_S]    = { "flt.s",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_flt_s, 1 },
+
+    [WST_VM_FLE_S]    = { "fle.s",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fle_s, 1 },
+
+    [WST_VM_FABS_S]   = { "fabs.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1, vm_exec_fabs_s, 1 },
+
+    [WST_VM_FNEG_S]   = { "fneg.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1, vm_exec_fneg_s, 1 },
+
+    [WST_VM_FMAX_S]   = { "fmax.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fmax_s, 1 },
+
+    [WST_VM_FMIN_S]   = { "fmin.s",   WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2, vm_exec_fmin_s, 1 },
+
+    [WST_VM_FMV_S]    = { "fmv.s",    WST_VM_INSTR_FORMAT_R,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1, vm_exec_fmv_s, 1 },
+
+    [WST_VM_FMADD]    = { "fmadd",    WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fmadd, 1 },
+
+    [WST_VM_FMSUB]    = { "fmsub",    WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fmsub, 1 },
+
+    [WST_VM_FNMADD]   = { "fnmadd",   WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fnmadd, 1 },
+
+    [WST_VM_FNMSUB]   = { "fnmsub",   WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fnmsub, 1 },
+
+    [WST_VM_FMADD_S]  = { "fmadd.s",  WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fmadd_s, 1 },
+
+    [WST_VM_FMSUB_S]  = { "fmsub.s",  WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fmsub_s, 1 },
+
+    [WST_VM_FNMADD_S] = { "fnmadd.s", WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fnmadd_s, 1 },
+
+    [WST_VM_FNMSUB_S] = { "fnmsub.s", WST_VM_INSTR_FORMAT_R4,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3,
+                          WST_VM_OPND_RD  | WST_VM_OPND_RS1 | WST_VM_OPND_RS2 | WST_VM_OPND_RS3, vm_exec_fnmsub_s, 1 },
 
     [WST_VM_ECALL]    = { "ecall",    WST_VM_INSTR_FORMAT_R,
                           WST_VM_OPND_NONE,

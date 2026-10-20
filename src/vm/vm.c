@@ -21,15 +21,7 @@ static int64_t vm_sign_ext(uint32_t field, unsigned width)
     return (int64_t)(clean ^ sign) - (int64_t)sign;
 }
 
-/* Zero means default, set `mem_max` before load to override. */
-static size_t vm_mem_limit(const WstVmContext *ctx)
-{
-    assert(ctx != NULL);
-
-    return ctx->mem_max != 0 ? ctx->mem_max : WST_VM_MEM_DEFAULT_MAX;
-}
-
-/* Zero means default, set `stack_size` before load to override. */
+/* Zero means `WST_VM_STACK_DEFAULT_SIZE`. */
 static size_t vm_stack_size(const WstVmContext *ctx)
 {
     assert(ctx != NULL);
@@ -96,8 +88,9 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 
 /* Size-specific accessors, misaligned access is fatal. */
 #define VM_DEF_MEM_RW(bits) \
-    U(bits) vm_mem_read##bits(WstVmContext *ctx, uint64_t addr) \
+    U(bits) vm_mem_read##bits(WstVm *vm, uint64_t addr) \
     { \
+        WstVmContext *ctx = vm->ctx; \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
         if (addr % ((bits) / 8) != 0) { \
             LOG_E("misaligned " #bits "-bit access at 0x%08" PRIx64, addr); \
@@ -106,8 +99,9 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
         return *(U(bits) *)&ctx->mem[(size_t)addr]; \
     } \
     \
-    void vm_mem_write##bits(WstVmContext *ctx, uint64_t addr, U(bits) value) \
+    void vm_mem_write##bits(WstVm *vm, uint64_t addr, U(bits) value) \
     { \
+        WstVmContext *ctx = vm->ctx; \
         vm_mem_ensure(ctx, addr, (bits) / 8); \
         if (addr % ((bits) / 8) != 0) { \
             LOG_E("misaligned " #bits "-bit access at 0x%08" PRIx64, addr); \
@@ -119,8 +113,9 @@ static void vm_mem_ensure(WstVmContext *ctx, uint64_t addr, uint64_t size)
 VM_DEF_MEM_RW(64)
 VM_DEF_MEM_RW(32)
 
-void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
+void vm_stack_push64(WstVm *vm, size_t pc, uint64_t value)
 {
+    WstVmContext *ctx = vm->ctx;
     uint64_t sp = R_SP;
 
     if (sp % 8 != 0) {
@@ -133,11 +128,12 @@ void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value)
     }
 
     R_SP = sp - 8;
-    vm_mem_write64(ctx, sp - 8, value);
+    vm_mem_write64(vm, sp - 8, value);
 }
 
-uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
+uint64_t vm_stack_pop64(WstVm *vm, size_t pc)
 {
+    WstVmContext *ctx = vm->ctx;
     uint64_t sp = R_SP;
 
     if (sp % 8 != 0) {
@@ -150,10 +146,10 @@ uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
     }
 
     R_SP = sp + 8;
-    return vm_mem_read64(ctx, sp);
+    return vm_mem_read64(vm, sp);
 }
 
-void wst_vm_init(WstVm *vm, const WstVmContext *ctx)
+void wst_vm_init(WstVm *vm, WstVmContext *ctx)
 {
     assert(vm != NULL);
     assert(ctx != NULL);
@@ -163,7 +159,7 @@ void wst_vm_init(WstVm *vm, const WstVmContext *ctx)
     for (size_t i = 0; i < WST_VM_NUM_FP; i++)
         vm->fp[i] = 0.0;
     vm->pc = ctx->entry;
-    vm->exit_code = 0;
+    vm->ctx = ctx;
     vm->regs[WST_VM_REG_SP] = (uint64_t)ctx->stack.top;
     vm->regs[1] = (uint64_t)ctx->config_addr;
 }
@@ -175,14 +171,13 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
 
     free(ctx->mem);
     ctx->mem = NULL;
-    ctx->mem_size = 0;
     ctx->entry = 0;
     ctx->config_addr = 0;
     ctx->stack.base = 0;
     ctx->stack.top = 0;
 
-    size_t limit = vm_mem_limit(ctx);
-    size_t top = limit & ~(size_t)7;
+    size_t mem_size = ctx->mem_size != 0 ? ctx->mem_size : WST_VM_MEM_DEFAULT_SIZE;
+    size_t top = mem_size & ~(size_t)7;
     size_t stack_size = vm_stack_size(ctx);
     if (stack_size > top) {
         LOG_E("stack of 0x%08zx bytes past mem end 0x%08zx", stack_size, top);
@@ -203,9 +198,9 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
     }
     config_addr = vm_align_down(config_addr - sizeof(ctx->config), 8);
 
-    uint8_t *mem = calloc(limit, sizeof(uint8_t));
+    uint8_t *mem = calloc(mem_size, sizeof(uint8_t));
     if (mem == NULL) {
-        LOG_E("cannot reserve 0x%08zx bytes", limit);
+        LOG_E("cannot reserve 0x%08zx bytes", mem_size);
         return false;
     }
 
@@ -220,12 +215,12 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path)
 
     ctx->config.magic = WST_VM_CONFIG_MAGIC;
     ctx->config.version = WST_VM_CONFIG_VERSION;
-    ctx->config.mem_size = (uint64_t)limit;
+    ctx->config.mem_size = (uint64_t)mem_size;
     ctx->config.stack_top = (uint64_t)top;
     memcpy(&mem[config_addr], &ctx->config, sizeof(ctx->config));
 
     ctx->mem = mem;
-    ctx->mem_size = limit;
+    ctx->mem_size = mem_size;
     ctx->entry = entry;
     ctx->config_addr = config_addr;
     ctx->stack.base = base;
@@ -268,6 +263,7 @@ bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins)
     ins->rd = 0;
     ins->rs1 = 0;
     ins->rs2 = 0;
+    ins->rs3 = 0;
     ins->imm = 0;
     ins->addr = addr;
 
@@ -279,6 +275,8 @@ bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins)
         ins->rs1 = (uint8_t)((word >> fmt->rs1_shift) & 0x7u);
     if (fmt->rs2_shift != 0)
         ins->rs2 = (uint8_t)((word >> fmt->rs2_shift) & 0x7u);
+    if (fmt->rs3_shift != 0)
+        ins->rs3 = (uint8_t)((word >> fmt->rs3_shift) & 0x7u);
 
     if (fmt->imm_shift != 0) {
         uint32_t field = word >> fmt->imm_shift;
@@ -349,7 +347,8 @@ bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
         }
 
         unsigned reg = slot == WST_VM_OPND_RD ? ins->rd :
-                       slot == WST_VM_OPND_RS1 ? ins->rs1 : ins->rs2;
+                       slot == WST_VM_OPND_RS1 ? ins->rs1 :
+                       slot == WST_VM_OPND_RS2 ? ins->rs2 : ins->rs3;
         char rname[4] = { (char)(((desc->fregs & slot) != 0) ? 'f' : 'x'),
                           (char)('0' + reg), '\0' };
         if (!vm_text_put(rname, buf, cap, &len))
@@ -359,11 +358,13 @@ bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
     return true;
 }
 
-bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
+bool wst_vm_decode(const WstVm *vm, WstVmInstr *ins)
 {
     assert(vm != NULL);
-    assert(ctx != NULL);
+    assert(vm->ctx != NULL);
     assert(ins != NULL);
+
+    const WstVmContext *ctx = vm->ctx;
 
     if (vm->pc % WST_VM_INSTR_SIZE != 0) {
         LOG_E("misaligned pc 0x%08zx", vm->pc);
@@ -392,10 +393,10 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins)
     return true;
 }
 
-WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+WstVmRet wst_vm_execute(WstVm *vm, const WstVmInstr *ins)
 {
     assert(vm != NULL);
-    assert(ctx != NULL);
+    assert(vm->ctx != NULL);
     assert(ins != NULL);
 
     /* Decode only fills valid ops, so handler always exists. */
@@ -411,7 +412,7 @@ WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     }
 
     vm->pc = ins->addr + WST_VM_INSTR_SIZE;
-    handler(vm, ctx, ins);
+    handler(vm, ins);
 
     return ret;
 }
@@ -422,5 +423,5 @@ void wst_vm_close(WstVm *vm)
         return;
 
     vm->pc = 0;
-    vm->exit_code = 0;
+    vm->ctx = NULL;
 }

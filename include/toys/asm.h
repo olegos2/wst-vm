@@ -9,10 +9,8 @@
 #include <stdio.h>
 
 /**
- * Assembled program before linking, code words plus data bytes.
- * Data addresses are data segment relative in code.
- * `entry` is the `:_start` address, zero when the source has none.
- * `wst_prog_save` links code and data into a program file with entry.
+ * Assembled program object before linking. Data addresses are data
+ * segment relative in code. `entry` is the `:_start` address or zero.
  */
 typedef struct {
     WstVecU32 code;
@@ -26,43 +24,23 @@ typedef struct {
 void wst_vm_asm_object_free(WstAsmObject *obj);
 
 /**
- * Assemble one code line (`mnemonic operands...`) into a 4-byte word.
- * Operands are `x0`-`x7`, `f0`-`f7` registers and decimal or hex numbers.
- * Unknown mnemonics, bad operands and out of range immediates are errors.
- *
- * A label operand (`:name`) is an error here.
+ * Assemble one code line into a 4-byte word. Labels are not allowed.
  *
  * @return `true` on success, `false` on failure.
  */
 bool wst_vm_asm_line(const char *line, size_t lineno, uint32_t *out);
 
 /**
- * Assemble whole source text into `out`.
- * Resets `out`, freeing previous content. Fails with `out` left empty.
- *
- * Sections, one per line, default is `.text`:
- * - `section .text`: code, `:label` definitions and instructions.
- * - `section .data`: `name: <type> <value>` entries, types are
- *   `u64`/`u32` (dec/hex int), `f64` (double), `str "..."` (no NUL
- *   added automatically) and `bytes` (hex pairs).
- *   `u64`/`f64` entries align to 8, `u32` to 4.
- *
- * Line forms in `.text`: empty line, `mnemonic operands...`, `:label`.
- * `#` comments are stripped, blank lines are skipped.
- *
- * Two passes: first pass emits words and records labels with data
- * names and their offsets. Second pass resolves every `:name` operand.
+ * Assemble whole source text into `out`, resetting it first and
+ * leaving it empty on failure.
  *
  * @return `true` on success, `false` on failure.
  */
 bool wst_vm_asm_source(const char *src, size_t len, WstAsmObject *out);
 
 /**
- * Write a program file as assembly text to `out`.
- * The whole code segment is printed, `:_start` at the entry and
- * `:label_<addr>` at branch and jump targets, then the data segment
- * as `bytes`. Output assembles back to an identical program file.
- * A cut by `max_words` skips the data segment.
+ * Write a program file as assembly text to `out`. A cut by `max_words`
+ * skips the data segment.
  *
  * @param out stream to print to
  * @param path program file to disassemble

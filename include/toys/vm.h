@@ -6,48 +6,30 @@
 #include <stdint.h>
 
 
-/**
- * Default memory size in bytes, reserved once on load.
- */
-#define WST_VM_MEM_DEFAULT_MAX ((size_t)256 * 1024 * 1024)
+typedef struct WstVmContext WstVmContext;
 
-/**
- * Default stack region size at the top of guest memory.
- */
+
+/** Default guest memory size. */
+#define WST_VM_MEM_DEFAULT_SIZE ((size_t)256 * 1024 * 1024)
+
+/** Default stack region size. */
 #define WST_VM_STACK_DEFAULT_SIZE ((size_t)64 * 1024)
 
-/**
- * Largest framebuffer dimensions the vm places.
- */
+/** Largest framebuffer dimensions. */
 #define WST_VM_FB_MAX_WIDTH 640
 #define WST_VM_FB_MAX_HEIGHT 480
 
-/**
- * Firmware configuration magic, "WSTF".
- */
+/** Config block magic, "WSTF", and version. */
 #define WST_VM_CONFIG_MAGIC 0x57535446u
-
-/**
- * Firmware configuration version.
- */
 #define WST_VM_CONFIG_VERSION 1u
 
-/**
- * Stack pointer register. Roles: `x0` is zero, `x1`-`x3` take params
- * with the return value in `x1`, `x4`-`x5` are callee-saved, `x6` is
- * the link register and caller-saved with the params, `x7` is sp.
- * `vm.regs[WST_VM_REG_SP]` grows down inside the `WstVmStack` range.
- */
+/** Stack pointer register. */
 #define WST_VM_REG_SP 7
 
-/**
- * Buffer size that always holds instruction text.
- */
+/** Instruction text buffer size. */
 #define WST_VM_INSTR_TEXT_CAP 64
 
-/**
- * Instruction size in bytes, pcs and code addresses align to it.
- */
+/** Instruction size in bytes. */
 #define WST_VM_INSTR_SIZE 4
 
 #define WST_VM_OPCODE_BITS 7
@@ -56,7 +38,7 @@
 /**
  * Operand slots, an instruction takes at most this many operands.
  */
-#define WST_VM_OPND_COUNT 4
+#define WST_VM_OPND_COUNT 5
 
 #define WST_VM_NUM_GPR 8
 #define WST_VM_NUM_FP  8
@@ -65,76 +47,118 @@
  * Instruction set, enum values match opcode bytes.
  */
 typedef enum {
-    /* 0x00 retired */
-    WST_VM_OUTI     = 0x01, /* print GPR as decimal */
-    WST_VM_OUTF     = 0x02, /* print FP register as double */
-    WST_VM_LD       = 0x03, /* load 64-bit, sign-extended */
-    WST_VM_LW       = 0x04, /* load 32-bit, sign-extended */
-    WST_VM_ST       = 0x05, /* store 64-bit */
-    WST_VM_SW       = 0x06, /* store low 32 bits */
-    WST_VM_FLD      = 0x07, /* load 64 bits into FP register */
-    WST_VM_FST      = 0x08, /* store FP register as 64 bits */
-    WST_VM_PUSHQR   = 0x09, /* push GPR bits */
-    WST_VM_PUSHQV   = 0x0A, /* push FP register bits */
-    WST_VM_POPQR    = 0x0B, /* pop bits into GPR */
-    WST_VM_POPQV    = 0x0C, /* pop bits into FP register */
-    WST_VM_JAL      = 0x0D, /* jump with link */
-    WST_VM_BEQ      = 0x0E, /* branch if equal */
-    WST_VM_BNE      = 0x0F, /* branch if not equal */
-    WST_VM_BLT      = 0x10, /* branch if less, signed */
-    WST_VM_BGE      = 0x11, /* branch if greater or equal, signed */
-    WST_VM_ADD      = 0x12, /* add 2 GPRs, store res in 3rd GPR. */
-    WST_VM_SUB      = 0x13, /* sub 2 GPRs, store res in 3rd GPR. */
+    WST_VM_OUTI     = 0x01,
+    WST_VM_OUTF     = 0x02,
+    WST_VM_LD       = 0x03,
+    WST_VM_LW       = 0x04,
+    WST_VM_ST       = 0x05,
+    WST_VM_SW       = 0x06,
+    WST_VM_FLD      = 0x07,
+    WST_VM_FST      = 0x08,
+    WST_VM_PUSHQR   = 0x09,
+    WST_VM_PUSHQV   = 0x0A,
+    WST_VM_POPQR    = 0x0B,
+    WST_VM_POPQV    = 0x0C,
+    WST_VM_JAL      = 0x0D,
+    WST_VM_BEQ      = 0x0E,
+    WST_VM_BNE      = 0x0F,
+    WST_VM_BLT      = 0x10,
+    WST_VM_BGE      = 0x11,
+    WST_VM_ADD      = 0x12,
+    WST_VM_SUB      = 0x13,
     WST_VM_MUL      = 0x14,
     WST_VM_DIV      = 0x15,
-    WST_VM_REM      = 0x16, /* signed remainder, RISC-V REM */
-    WST_VM_AND      = 0x17, /* bitwise AND on registers */
-    WST_VM_OR       = 0x18, /* bitwise OR on registers */
-    WST_VM_XOR      = 0x19, /* bitwise XOR on registers */
-    WST_VM_SLL      = 0x1A, /* shift left unsigned */
-    WST_VM_SRL      = 0x1B, /* shift right unsigned */
-    WST_VM_SRA      = 0x1C, /* shift right signed */
-    WST_VM_ADDI     = 0x1D, /* add register and immediate, store res in 3rd register. */
+    WST_VM_REM      = 0x16,
+    WST_VM_AND      = 0x17,
+    WST_VM_OR       = 0x18,
+    WST_VM_XOR      = 0x19,
+    WST_VM_SLL      = 0x1A,
+    WST_VM_SRL      = 0x1B,
+    WST_VM_SRA      = 0x1C,
+    WST_VM_ADDI     = 0x1D,
     WST_VM_LUI      = 0x1E,
-    WST_VM_FADD     = 0x1F, /* add 2 FP regs, store res in 3rd FP reg. */
-    WST_VM_FSUB     = 0x20, /* sub 2 FP regs, store res in 3rd FP reg. */
+    WST_VM_FADD     = 0x1F,
+    WST_VM_FSUB     = 0x20,
     WST_VM_FMUL     = 0x21,
-    WST_VM_FDIV     = 0x22, 
+    WST_VM_FDIV     = 0x22,
     WST_VM_FSQRT    = 0x23,
-    /* 0x24 retired */
-    WST_VM_FEQ      = 0x25, /* FP compare equal, 0/1 stored into GPR */
-    WST_VM_FLT      = 0x26, /* FP compare less than, 0/1 stored into GPR */
-    WST_VM_FLE      = 0x27, /* FP compare less then equal, 0/1 stored into GPR */
-    WST_VM_ECALL    = 0x28, /* host call by number in x1 */
-    WST_VM_CALL     = 0x29, /* push pc+4 on stack, jump */
-    WST_VM_RET      = 0x2A, /* pop pc from stack */
-    WST_VM_INI      = 0x2B, /* read decimal integer from stdin into GPR */
-    WST_VM_INF      = 0x2C, /* read double from stdin into FP register */
-    WST_VM_JALR     = 0x2D, /* jump to register with link */
-    WST_VM_DIVU     = 0x2E, /* unsigned divide */
-    WST_VM_REMU     = 0x2F, /* unsigned remainder */
-    WST_VM_ANDI     = 0x30, /* bitwise AND with immediate */
-    WST_VM_ORI      = 0x31, /* bitwise OR with immediate */
-    WST_VM_XORI     = 0x32, /* bitwise XOR with immediate */
-    WST_VM_SLLI     = 0x33, /* shift left logical with immediate */
-    WST_VM_SRLI     = 0x34, /* shift right logical with immediate */
-    WST_VM_SRAI     = 0x35, /* shift right arithmetic with immediate */
-    WST_VM_SLTI     = 0x36, /* set if less than immediate, signed */
-    WST_VM_SLTIU    = 0x37, /* set if less than immediate, unsigned */
-    WST_VM_AUIPC    = 0x38, /* add upper immediate to pc */
+    WST_VM_FEQ      = 0x25,
+    WST_VM_FLT      = 0x26,
+    WST_VM_FLE      = 0x27,
+    WST_VM_ECALL    = 0x28,
+    WST_VM_CALL     = 0x29,
+    WST_VM_RET      = 0x2A,
+    WST_VM_INI      = 0x2B,
+    WST_VM_INF      = 0x2C,
+    WST_VM_JALR     = 0x2D,
+    WST_VM_DIVU     = 0x2E,
+    WST_VM_REMU     = 0x2F,
+    WST_VM_ANDI     = 0x30,
+    WST_VM_ORI      = 0x31,
+    WST_VM_XORI     = 0x32,
+    WST_VM_SLLI     = 0x33,
+    WST_VM_SRLI     = 0x34,
+    WST_VM_SRAI     = 0x35,
+    WST_VM_SLTI     = 0x36,
+    WST_VM_SLTIU    = 0x37,
+    WST_VM_AUIPC    = 0x38,
+    WST_VM_LWU      = 0x39,
+    WST_VM_SLT      = 0x3A,
+    WST_VM_SLTU     = 0x3B,
+    WST_VM_BLTU     = 0x3C,
+    WST_VM_BGEU     = 0x3D,
+    WST_VM_ADDW     = 0x3E,
+    WST_VM_SUBW     = 0x3F,
+    WST_VM_MULW     = 0x40,
+    WST_VM_DIVW     = 0x41,
+    WST_VM_DIVUW    = 0x42,
+    WST_VM_REMW     = 0x43,
+    WST_VM_REMUW    = 0x44,
+    WST_VM_SLLW     = 0x45,
+    WST_VM_SRLW     = 0x46,
+    WST_VM_SRAW     = 0x47,
+    WST_VM_ADDIW    = 0x48,
+    WST_VM_SLLIW    = 0x49,
+    WST_VM_SRLIW    = 0x4A,
+    WST_VM_SRAIW    = 0x4B,
+    WST_VM_FLW      = 0x4C,
+    WST_VM_FSW      = 0x4D,
+    WST_VM_FCVT_S_W = 0x4E,
+    WST_VM_FCVT_W_S = 0x4F,
+    WST_VM_FADD_S   = 0x50,
+    WST_VM_FSUB_S   = 0x51,
+    WST_VM_FMUL_S   = 0x52,
+    WST_VM_FDIV_S   = 0x53,
+    WST_VM_FSQRT_S  = 0x54,
+    WST_VM_FEQ_S    = 0x5B,
+    WST_VM_FLT_S    = 0x5C,
+    WST_VM_FLE_S    = 0x5D,
+    WST_VM_FABS_S   = 0x5E,
+    WST_VM_FNEG_S   = 0x5F,
+    WST_VM_FMAX_S   = 0x60,
+    WST_VM_FMIN_S   = 0x61,
+    WST_VM_FMV_S    = 0x62,
+    WST_VM_FMADD    = 0x63,
+    WST_VM_FMSUB    = 0x64,
+    WST_VM_FNMADD   = 0x65,
+    WST_VM_FNMSUB   = 0x66,
+    WST_VM_FMADD_S  = 0x67,
+    WST_VM_FMSUB_S  = 0x68,
+    WST_VM_FNMADD_S = 0x69,
+    WST_VM_FNMSUB_S = 0x6A,
 } WstVmOp;
 
 /**
- * Host calls for `ecall`, number goes in `x1`.
+ * Host calls for `ecall`, compared against `x1`.
  */
 typedef enum {
-    WST_VM_SYS_EXIT  = 0,   /* exit with code from x2 */
-    WST_VM_SYS_WRITE = 1,   /* write x4 bytes from x3 to fd x2, count back in x1 */
-    WST_VM_SYS_FLUSH = 2,   /* yield for a host frame, 0 in x1 */
+    WST_VM_SYS_EXIT  = 0,
+    WST_VM_SYS_WRITE = 1,
+    WST_VM_SYS_FLUSH = 2,
 } WstVmSyscall;
 
 /**
- * Syscall table size, entries past the last named call stay NULL.
+ * Syscall table size, some slots may be NULL.
  */
 #define WST_VM_SYSCALL_COUNT 128
 
@@ -143,33 +167,33 @@ typedef enum {
  */
 typedef enum {
     WST_VM_INSTR_FORMAT_INVALID = 0,
-    WST_VM_INSTR_FORMAT_R,  /* rd, rs1, rs2 */
-    WST_VM_INSTR_FORMAT_I,  /* rd, rs1, imm */
-    WST_VM_INSTR_FORMAT_S,  /* rs1, rs2, imm */
-    WST_VM_INSTR_FORMAT_B,  /* like S, imm counts from pc */
-    WST_VM_INSTR_FORMAT_U,  /* rd, imm scaled to the high bits */
-    WST_VM_INSTR_FORMAT_J,  /* rd, imm counts from pc */
+    WST_VM_INSTR_FORMAT_R,
+    WST_VM_INSTR_FORMAT_I,
+    WST_VM_INSTR_FORMAT_S,
+    WST_VM_INSTR_FORMAT_B,
+    WST_VM_INSTR_FORMAT_U,
+    WST_VM_INSTR_FORMAT_J,
+    WST_VM_INSTR_FORMAT_R4,
     WST_VM_INSTR_FORMAT_COUNT,
 } WstVmInstrFormat;
 
 /**
  * Field layout of one instruction format.
  *
- * A zero shift means the format lacks the field, the opcode owns
- * bits 6:0. Immediate fields sit in the high bits and signed ones
- * sign-extend back from `imm_bits`.
+ * A zero shift means the format lacks the field.
  */
 typedef struct {
-    /** Bit shifts of the register fields. */
+    /** Register field shifts, zero when absent. */
     uint8_t rd_shift;
     uint8_t rs1_shift;
     uint8_t rs2_shift;
-    /** Bit shift and width of the immediate field. */
+    uint8_t rs3_shift;
+    /** Immediate shift and width. */
     uint8_t imm_shift;
     uint8_t imm_bits;
     /** Immediate is signed, unsigned ones store `imm >> imm_shift`. */
     bool imm_signed;
-    /** Immediate counts from the instruction address, not zero. */
+    /** Immediate counts from the instruction address. */
     bool pc_relative;
 } WstVmInstrFormatDesc;
 
@@ -180,31 +204,26 @@ extern const WstVmInstrFormatDesc wst_vm_format_table[WST_VM_INSTR_FORMAT_COUNT]
 
 /**
  * Operand slots an instruction uses, as a bitmask.
- * Bits ascend in assembly order (rd, rs1, rs2, imm).
+ * Bits ascend in assembly order (rd, rs1, rs2, rs3, imm).
  */
 typedef enum {
     WST_VM_OPND_NONE = 0,
     WST_VM_OPND_RD   = 1u << 0,
     WST_VM_OPND_RS1  = 1u << 1,
     WST_VM_OPND_RS2  = 1u << 2,
-    WST_VM_OPND_IMM  = 1u << 3,
+    WST_VM_OPND_RS3  = 1u << 3,
+    WST_VM_OPND_IMM  = 1u << 4,
 } WstVmOperand;
 
 /**
  * Decoded instruction, immediates already sign-extended.
  */
 typedef struct WstVmInstr {
-    /** Instruction opcode. */
     WstVmOp op;
-    /** Destination register index. */
-    uint8_t rd;
-    /** Source 1 register index. */
-    uint8_t rs1;
-    /** Source 2 register index. */
-    uint8_t rs2;
-    /** Immediate value. */
+    /** Register indices. */
+    uint8_t rd, rs1, rs2, rs3;
+    /** Immediate and instruction address. */
     int64_t imm;
-    /** Instruction address. */
     size_t addr;
 } WstVmInstr;
 
@@ -212,23 +231,21 @@ typedef struct WstVmInstr {
  * Per-thread vm state.
  */
 typedef struct WstVm {
-    /** General purpose registers */
     uint64_t regs[WST_VM_NUM_GPR];
-    /** FP registers */
+    /** FP registers hold raw bits, f32 values are NaN-boxed. */
     double fp[WST_VM_NUM_FP];
-    /** Program counter */
     size_t pc;
-    /** Guest exit code, valid after `WST_VM_RUN_EXIT`. */
-    int exit_code;
+    /** Context bound by `wst_vm_init`, must outlive vm. */
+    WstVmContext *ctx;
 } WstVm;
 
 /**
- * Result of running the vm.
+ * Result of interpreting instruction.
  */
 typedef enum {
     /** Instruction finished, keep running. */
     WST_VM_RUN_CONTINUE = 0,
-    /** Guest asked the host for a frame with `flush`. */
+    /** Guest asked the host for a frame. */
     WST_VM_RUN_FLUSH,
     /** Guest stopped with the `exit` host call. */
     WST_VM_RUN_EXIT,
@@ -238,13 +255,7 @@ typedef enum {
 
 /**
  * Value stack at the top of guest RAM, growing down.
- *
- * `size` is taken on load, zero means `WST_VM_STACK_DEFAULT_SIZE`.
- * `base`/`top` are outputs set by `wst_vm_context_load`.
- *
- * The range lives in shared memory so stack slots stay directly
- * addressable (`ld`/`st` with `x7`), the pointer itself is per-thread
- * state in `WstVm.regs[WST_VM_REG_SP]`.
+ * `size` is the requested size, `base`/`top` are set on load.
  */
 typedef struct {
     size_t size;
@@ -256,18 +267,12 @@ typedef struct {
  * Guest pixel formats.
  */
 typedef enum {
-    /** Four bytes per pixel in R, G, B, A order, raylib RGBA8. */
     WST_VM_FB_FORMAT_RGBA8888 = 1,
 } WstVmFbFormat;
 
 /**
  * Firmware configuration copied into guest memory on load.
- *
- * The guest gets its address in `x1` at entry. `fb_width` and
- * `fb_height` are zero when the framebuffer is off, `fb_addr` points
- * at the first pixel and `fb_stride` is the byte distance between
- * rows. `mem_size` covers the whole reservation, `stack_top` is the
- * first byte above the stack.
+ * Field offsets and pixel formats are in docs/memory-map.md.
  */
 typedef struct {
     /** `WST_VM_CONFIG_MAGIC`. */
@@ -284,50 +289,40 @@ typedef struct {
     uint32_t fb_stride;
     /** Pixel format, a `WstVmFbFormat`. */
     uint32_t fb_format;
-    /** Whole guest memory reservation in bytes. */
+    /** Whole guest memory size in bytes. */
     uint64_t mem_size;
     /** First byte above the stack. */
     uint64_t stack_top;
 } WstVmConfig;
 
 /**
- * Vm context that owns guest physical memory.
- *
- * `mem` is reserved once on load with `calloc`, never expanded.
- * `mem_size` is the reserved size. `mem_max` caps it, zero means
- * `WST_VM_MEM_DEFAULT_MAX`, set it before `wst_vm_context_load`
- * to override. Every load/store/fetch past the reservation is fatal.
- *
- * `config` describes the firmware handoff. Set `config.fb_width`,
- * `config.fb_height` and `config.fb_format` before load to place a
- * framebuffer, zero width and height keep it off. Load fills the
- * remaining fields, copies the struct into guest memory at
- * `config_addr` and places it below the framebuffer.
- *
- * After load pass the context to `wst_vm_init` to set the boot
- * registers.
+ * Vm context that holds guest environment (mem, stack, config).
  */
-typedef struct WstVmContext {
+struct WstVmContext {
+    /** Guest RAM, reserved on load. */
     uint8_t *mem;
+    /** Guest RAM size, request on input and reservation on success. */
     size_t mem_size;
+    /** Program entry. */
     size_t entry;
-    size_t mem_max;
+    /** Config passed to guest. */
     WstVmConfig config;
+    /** Address where config was placed for guest. */
     size_t config_addr;
     WstVmStack stack;
-} WstVmContext;
+};
 
 /**
  * Handler of a single instruction.
  *
  * Runs with live state, jumps overwrite pc.
  */
-typedef void (*WstVmInstrHandler)(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
+typedef void (*WstVmInstrHandler)(WstVm *vm, const WstVmInstr *ins);
 
 /**
  * Handler of a single syscall.
  */
-typedef void (*WstVmSyscallHandler)(WstVm *vm, WstVmContext *ctx, size_t addr);
+typedef void (*WstVmSyscallHandler)(WstVm *vm, size_t addr);
 
 
 /**
@@ -352,20 +347,14 @@ typedef struct {
 extern const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES];
 
 /**
- * Reset the vm and apply boot state from a loaded context.
- *
- * Zeroes the integer and fp registers, sets `pc` to `ctx->entry`,
- * `x7` to `ctx->stack.top` and `x1` to `ctx->config_addr`.
+ * Reset vm registers, pc and context pointer.
  */
-void wst_vm_init(WstVm *vm, const WstVmContext *ctx);
+void wst_vm_init(WstVm *vm, WstVmContext *ctx);
 
 /**
- * Load program file into a fresh address space with the stack
- * on top of RAM and the firmware config below it.
- *
- * Honors `mem_max`, `stack.size` and the framebuffer request in
- * `ctx->config`, then fills `config_addr`, `config` and the stack
- * range. Pass the loaded context to `wst_vm_init` for the boot state.
+ * Load a program file and lay out guest RAM, stack, config and
+ * framebuffer. `ctx->mem_size` and `ctx->stack.size` are requests,
+ * zero means the default.
  *
  * @return `true` on success, `false` otherwise.
  */
@@ -377,11 +366,11 @@ bool wst_vm_context_load(WstVmContext *ctx, const char *path);
 void wst_vm_context_free(WstVmContext *ctx);
 
 /**
- * Decode instruction at pc without moving it.
+ * Decode instruction at pc, does not advance pc.
  *
  * @return `true` when instruction was decoded, `false` on error.
  */
-bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins);
+bool wst_vm_decode(const WstVm *vm, WstVmInstr *ins);
 
 /**
  * Decode one instruction word, `addr` goes to `ins->addr`.
@@ -391,9 +380,8 @@ bool wst_vm_decode(const WstVm *vm, const WstVmContext *ctx, WstVmInstr *ins);
 bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins);
 
 /**
- * Write one decoded instruction as `mnemonic operands` into `buf`.
- * `imm_text` prints in place of the immediate when not NULL.
- * Output can be re-assembled. `WST_VM_INSTR_TEXT_CAP` always fits.
+ * Write one decoded instruction assembly line into `buf`.
+ * `imm_text` is used to insert labels in place of imm.
  *
  * @return `true` on success, `false` when `buf` is too small.
  */
@@ -401,21 +389,16 @@ bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
                        char *buf, size_t cap);
 
 /**
- * Execute one decoded instruction, moving pc past it.
- * Stack and memory errors are fatal.
+ * Execute one decoded instruction and advance pc.
+ * Stack and memory errors are fatal. The host resumes after a flush
+ * and stops after an exit.
  *
- * A `flush` host call returns `WST_VM_RUN_FLUSH`; the host presents
- * a frame, then calls this again. Flushes therefore run at the pace
- * the host presents frames. The `exit` host call returns
- * `WST_VM_RUN_EXIT` with the code in `vm->exit_code`.
- *
- * @return `WST_VM_RUN_CONTINUE` normally, `WST_VM_RUN_FLUSH` after
- * a flush request, `WST_VM_RUN_EXIT` after an exit request.
+ * @return requested program continuation.
  */
-WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
+WstVmRet wst_vm_execute(WstVm *vm, const WstVmInstr *ins);
 
 /**
- * Reset program counter. Safe on zero state.
+ * Reset pc and the context pointer. Safe on zero state.
  */
 void wst_vm_close(WstVm *vm);
 

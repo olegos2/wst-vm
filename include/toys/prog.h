@@ -42,11 +42,8 @@ typedef struct {
 } WstProgSegment;
 
 /**
- * Load program file segments into memory.
- * Validates the whole file before touching memory.
- * `mem` must hold `mem_size` zeroed bytes, the image span inside
- * is zeroed again and file parts copied over. Entry point goes
- * to `entry_out`. Segments past `mem_size` are rejected.
+ * Validate, then load program file segments into zeroed memory.
+ * Segments past `mem_size` are rejected.
  *
  * @return `true` on success, `false` on failure.
  */

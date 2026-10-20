@@ -12,3 +12,13 @@ executable(
     ],
     install: true,
 )
+
+executable(
+    'mandelbulb_ref',
+    sources: files(
+        'mandelbulb_ref.c',
+    ),
+    dependencies: [
+        m_dep,
+    ],
+)

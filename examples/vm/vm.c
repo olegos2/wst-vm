@@ -10,7 +10,7 @@
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(*arr))
 
 /* Library defaults in MiB and KiB. */
-#define VM_DEFAULT_MEM_MB ((int)(WST_VM_MEM_DEFAULT_MAX / (1024 * 1024)))
+#define VM_DEFAULT_MEM_MB ((int)(WST_VM_MEM_DEFAULT_SIZE / (1024 * 1024)))
 #define VM_DEFAULT_STACK_KB ((int)(WST_VM_STACK_DEFAULT_SIZE / 1024))
 
 /* Default framebuffer size in pixels. */
@@ -34,22 +34,23 @@ static void vm_cleanup(void)
 }
 
 /* Run guest instructions until it asks for the next frame or stops. */
-static WstVmRet vm_run_until_flush(WstVm *machine, WstVmContext *context)
+static WstVmRet vm_run_until_flush(WstVm *machine)
 {
     for (;;) {
         WstVmInstr instr = { 0 };
-        if (!wst_vm_decode(machine, context, &instr))
+        if (!wst_vm_decode(machine, &instr))
             return WST_VM_RUN_ERROR;
 
-        WstVmRet ret = wst_vm_execute(machine, context, &instr);
+        WstVmRet ret = wst_vm_execute(machine, &instr);
         if (ret != WST_VM_RUN_CONTINUE)
             return ret;
     }
 }
 
 /* Show the guest framebuffer in a raylib window until it closes. */
-static int run_fb(WstVm *machine, WstVmContext *context, int scale)
+static int run_fb(WstVm *machine, int scale)
 {
+    WstVmContext *context = machine->ctx;
     int width = (int)context->config.fb_width;
     int height = (int)context->config.fb_height;
     int window_width = width * scale;
@@ -73,19 +74,18 @@ static int run_fb(WstVm *machine, WstVmContext *context, int scale)
     SetTextureFilter(texture, TEXTURE_FILTER_POINT);
 
     int refresh = GetMonitorRefreshRate(GetCurrentMonitor());
-    /* Pseudo vsync, EndDrawing waits for the next frame slot. */
     SetTargetFPS(refresh > 0 ? refresh : VM_FB_DEFAULT_FPS);
 
     bool ok = true;
     int guest_code = EXIT_SUCCESS;
     while (!WindowShouldClose()) {
-        WstVmRet ret = vm_run_until_flush(machine, context);
+        WstVmRet ret = vm_run_until_flush(machine);
         if (ret == WST_VM_RUN_ERROR) {
             ok = false;
             break;
         }
         if (ret == WST_VM_RUN_EXIT) {
-            guest_code = machine->exit_code;
+            guest_code = (int)(machine->regs[2] & 0xFFu);
             break;
         }
 
@@ -229,7 +229,7 @@ int main(int argc, char **argv)
         ctx.config.fb_format = WST_VM_FB_FORMAT_RGBA8888;
     }
 
-    ctx.mem_max = (size_t)mem_mb * 1024 * 1024;
+    ctx.mem_size = (size_t)mem_mb * 1024 * 1024;
     ctx.stack.size = (size_t)stack_kb * 1024;
 
     if (!wst_vm_context_load(&ctx, prog_path))
@@ -238,14 +238,14 @@ int main(int argc, char **argv)
     atexit(vm_cleanup);
 
     if (ctx.config.fb_addr != 0)
-        return run_fb(&vm, &ctx, fb_scale);
+        return run_fb(&vm, fb_scale);
 
     WstVmInstr instr = { 0 };
     while (1) {
-        if (!wst_vm_decode(&vm, &ctx, &instr))
+        if (!wst_vm_decode(&vm, &instr))
             return EXIT_FAILURE;
-        WstVmRet ret = wst_vm_execute(&vm, &ctx, &instr);
+        WstVmRet ret = wst_vm_execute(&vm, &instr);
         if (ret == WST_VM_RUN_EXIT)
-            return vm.exit_code;
+            return (int)(vm.regs[2] & 0xFFu);
     }
 }

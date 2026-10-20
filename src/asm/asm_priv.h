@@ -37,7 +37,7 @@ typedef struct {
     size_t lineno;
 } AsmFixup;
 
-/* Stamped tables, decls everywhere, impls only where ASM_TYPES_IMPL is used. */
+
 #ifdef ASM_TYPES_IMPL
 #define VEC_IMPL
 #endif
@@ -56,7 +56,7 @@ typedef struct {
 #undef VEC_IMPL
 #endif
 
-/** First-pass state, output buffers, symbol table, fixup list, section. */
+/** Output buffers, symbol table, fixup list and current section. */
 typedef struct {
     WstAsmObject *obj;
     WstVecSym syms;
@@ -115,8 +115,8 @@ bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
 void asm_tables_free(AsmCtx *ctx);
 
 /**
- * Encode one `mnemonic operands...` line with comments stripped.
- * A `:name` operand comes back in `sym_out`, free it after use.
+ * Encode one assembly line with comments stripped. A `:name` operand
+ * comes back in `sym_out`, free it after use.
  */
 bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
                      uint32_t *word_out, char **sym_out,

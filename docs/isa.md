@@ -1,23 +1,23 @@
 # Toy RISC-V ISA
 
-Small virtual machine with fixed 4 byte instructions. It mimics layouts
-and naming from RISC-V but simplified. No flags and no SIMD yet.
+Fixed 4 byte instructions, RISC-V inspired but simplified. No flags or
+SIMD. The core is 64 bit; W operations return 32 bit results and `.s`
+operations use single precision.
 
-Machine memory layout and boot state are in
-[memory-map](memory-map.md).
+Machine memory layout and boot state: [memory-map](memory-map.md).
 
 ## Registers
 
-Eight 64 bit integer registers named `x0` to `x7`. Register `x0` always
-reads as zero and drops writes. This gives free idioms. Jump with no link
-target is just a jump. Address zero plus offset reaches absolute memory.
-Subtract into `x0` compares without keeping the result.
+Eight integer registers `x0` to `x7`. `x0` reads as zero and drops writes.
 
-Eight double registers named `f0` to `f7`. Plain IEEE doubles, no extra
-rules.
+Eight floating registers `f0` to `f7`, holding raw 64 bit patterns.
+`fld`/`fst` move doubles; `fadd`, `fsub`, `fmul`, `fdiv` and `fsqrt`
+operate on those bits. `flw` loads a single and NaN-boxes it, `fsw`
+stores the low 32 bits. `.s` operations require boxed singles and box
+their results; an unboxed value reads as canonical NaN. Use `flw` for
+`f32`, never `fld`. `outf` prints a boxed single, otherwise the double.
 
-`pc` is a byte offset into the address space. It must stay aligned to 4.
-Odd targets trap instead of running garbage.
+`pc` is a 4-aligned byte offset.
 
 | Register | Hardware role | Owner convention | ABI convention |
 | -------- | ------------- | ---------------- | -------------- |
@@ -28,21 +28,20 @@ Odd targets trap instead of running garbage.
 | `x4`     | —             | callee           | —              |
 | `x5`     | —             | callee           | —              |
 | `x6`     | —             | caller           | return address |
-| `x7`     | —             | callee           | `sp`, stack pointer  |
+| `x7`     | —             | callee           | `sp`, stack pointer |
 
-RISC-V has no dedicated stack ops either: `sp` plus `ld`/`st`/`addi`
-is the convention there too. Our `pushqr`/`pushqv`/`popqr`/`popqv`
-plus `call`/`ret` are conveniences over the same idea.
+`x7` plus `ld`/`st`/`addi` is the stack convention. `pushqr`/`pushqv`/
+`popqr`/`popqv` and `call`/`ret` use the same value stack.
 
 ## Instruction word
 
-Every instruction is 4 byte little-endian word. Low 7 bits hold the
-opcode. The rest depends on the format. Register fields are 3 bits wide,
-so values 0 to 7.
+Each instruction is a 4 byte little-endian word. Low 7 bits hold the
+opcode; register fields are 3 bits.
 
 | Format | Bit fields |
 | ------ |:---------- |
 | R      | `opcode[6:0]` `rd[9:7]` `rs1[12:10]` `rs2[15:13]` |
+| R4     | `opcode[6:0]` `rd[9:7]` `rs1[12:10]` `rs2[15:13]` `rs3[18:16]` |
 | I      | `opcode[6:0]` `rd[9:7]` `rs1[12:10]` `imm[31:13]`, signed 19 bits |
 | S      | `opcode[6:0]` `rs1[9:7]` `rs2[12:10]` `imm[31:13]`, signed 19 bits |
 | B      | `opcode[6:0]` `rs1[9:7]` `rs2[12:10]` `imm[31:13]`, same shape as S, imm counts from current address |
@@ -52,6 +51,7 @@ so values 0 to 7.
 | Format | Used for |
 | ------ |:-------- |
 | R      | Register to register work with up to 3 registers |
+| R4     | Fused multiply-add with 4 registers |
 | I      | Loads, small constants and single register ops |
 | S      | Stores with base from register and signed 19 bit offset |
 | B      | Two register comparison and jump relative to current `pc` with signed 19 bit offset |
@@ -62,14 +62,10 @@ so values 0 to 7.
 
 ## Opcodes
 
-How to read the semantics column:
-`R[x]` is integer register `x`,
-`F[f]` is float register `f`,
-`M[a:n]` is `n` bytes at address `a`,
-`S64`/`S32` are signed views or sign extension op,
-`PC` is the current address,
-`STACK` is the memory-backed value stack.
-All integer arithmetic wraps modulo 2^64.
+`R[x]`/`F[x]` are integer/float registers, `M[a:n]` is `n` bytes at
+address `a`, `S64`/`S32` sign-extend, `PC` is the current address and
+`STACK` is the value stack. Integer arithmetic wraps modulo 2^64. In
+`.s` rows, `f32(...)` reads a boxed single and the result is boxed.
 
 | Opcode | Mnemonic | Format | Operands          | Semantics                                         | Stands for |
 | ------:|:-------- | ------ |:----------------- | ------------------------------------------------- | ---------- |
@@ -79,8 +75,8 @@ All integer arithmetic wraps modulo 2^64.
 | `0x04` | `lw`     | I      | `rd`  `rs1` `imm` | `R[rd] := S64(M[R[rs1] + 4*imm:4])`               | load word |
 | `0x05` | `st`     | S      | `rs1` `rs2` `imm` | `M[R[rs1] + 8*imm:8] := R[rs2]`                   | store doubleword |
 | `0x06` | `sw`     | S      | `rs1` `rs2` `imm` | `M[R[rs1] + 4*imm:4] := R[rs2][31:0]`             | store word |
-| `0x07` | `fld`    | I      | `rd`  `rs1` `imm` | `F[rd] := M[R[rs1] + 8*imm:8]`                    | float load doubleword |
-| `0x08` | `fst`    | S      | `rs1` `rs2` `imm` | `M[R[rs1] + 8*imm:8] := F[rs2]`                   | float store doubleword |
+| `0x07` | `fld`    | I      | `rd`  `rs1` `imm` | `F[rd] := M[R[rs1] + 8*imm:8]`                    | fp load doubleword |
+| `0x08` | `fst`    | S      | `rs1` `rs2` `imm` | `M[R[rs1] + 8*imm:8] := F[rs2]`                   | fp store doubleword |
 | `0x09` | `pushqr` | I      | `rs1`             | `STACK.push(R[rs1])`                              | push quadword from GPR |
 | `0x0A` | `pushqv` | I      | `rs1`             | `STACK.push(F[rs1])`                              | push quadword from fp reg |
 | `0x0B` | `popqr`  | I      | `rd`              | `R[rd] := STACK.pop()`                            | pop quadword to GPR |
@@ -102,15 +98,15 @@ All integer arithmetic wraps modulo 2^64.
 | `0x1B` | `srl`    | R      | `rd`  `rs1` `rs2` | `R[rd] := R[rs1] >> (R[rs2] & 63)`                | shift right logical |
 | `0x1C` | `sra`    | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(R[rs1]) >> (R[rs2] & 63)`           | shift right arithmetic |
 | `0x1D` | `addi`   | I      | `rd`  `rs1` `imm` | `R[rd] := R[rs1] + S64(imm)`                      | add immediate |
-| `0x1E` | `lui`    | U      | `rd`  `imm`       | `R[rd] := imm << 12`                              | load upper immediate |
-| `0x1F` | `fadd`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] + F[rs2]`                        | float add |
-| `0x20` | `fsub`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] - F[rs2]`                        | float subtract |
-| `0x21` | `fmul`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] * F[rs2]`                        | float multiply |
-| `0x22` | `fdiv`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] / F[rs2]`                        | float divide |
-| `0x23` | `fsqrt`  | R      | `rd`  `rs1`       | `F[rd] := sqrt(F[rs1])`                           | float square root |
-| `0x25` | `feq`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (F[rs1] == F[rs2]) ? 1 : 0`             | float compare equal |
-| `0x26` | `flt`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (F[rs1] < F[rs2])? 1 : 0`               | float compare less than |
-| `0x27` | `fle`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (F[rs1] <= F[rs2])? 1 : 0`              | float compare less or equal |
+| `0x1E` | `lui`    | U      | `rd`  `imm`       | `R[rd] := imm`                                    | load upper immediate |
+| `0x1F` | `fadd`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] + F[rs2]`                        | fp add |
+| `0x20` | `fsub`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] - F[rs2]`                        | fp subtract |
+| `0x21` | `fmul`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] * F[rs2]`                        | fp multiply |
+| `0x22` | `fdiv`   | R      | `rd`  `rs1` `rs2` | `F[rd] := F[rs1] / F[rs2]`                        | fp divide |
+| `0x23` | `fsqrt`  | R      | `rd`  `rs1`       | `F[rd] := sqrt(F[rs1])`                           | fp square root |
+| `0x25` | `feq`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (F[rs1] == F[rs2]) ? 1 : 0`             | fp compare equal |
+| `0x26` | `flt`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (F[rs1] < F[rs2])? 1 : 0`               | fp compare less than |
+| `0x27` | `fle`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (F[rs1] <= F[rs2])? 1 : 0`              | fp compare less or equal |
 | `0x28` | `ecall`  | R      |                   | `host(R[x1])`                                     | environment call, see table below |
 | `0x29` | `call`   | J      | `imm`             | `STACK.push(PC+4); PC := PC+imm`                  | call routine |
 | `0x2A` | `ret`    | R      |                   | `PC := STACK.pop()`                               | return from routine |
@@ -127,52 +123,94 @@ All integer arithmetic wraps modulo 2^64.
 | `0x35` | `srai`   | I      | `rd`  `rs1` `imm` | `R[rd] := S64(R[rs1])>>(S64(imm) & 63)`           | shift right arithmetic immediate |
 | `0x36` | `slti`   | I      | `rd`  `rs1` `imm` | `R[rd] := (S64(R[rs1]) < S64(imm)) ? 1 : 0`       | set less than immediate, signed |
 | `0x37` | `sltiu`  | I      | `rd`  `rs1` `imm` | `R[rd] := (R[rs1] < U64(S64(imm))) ? 1 : 0`       | set less than immediate, unsigned |
-| `0x38` | `auipc`  | U      | `rd`  `imm`       | `R[rd] := PC + (imm << 12)`                       | add upper immediate to pc |
+| `0x38` | `auipc`  | U      | `rd`  `imm`       | `R[rd] := PC + imm`                               | add upper immediate to pc |
+| `0x39` | `lwu`    | I      | `rd`  `rs1` `imm` | `R[rd] := M[R[rs1] + 4*imm:4]`                    | load word unsigned |
+| `0x3A` | `slt`    | R      | `rd`  `rs1` `rs2` | `R[rd] := (S64(R[rs1]) < S64(R[rs2])) ? 1 : 0`    | set less than |
+| `0x3B` | `sltu`   | R      | `rd`  `rs1` `rs2` | `R[rd] := (R[rs1] < R[rs2]) ? 1 : 0`              | set less than unsigned |
+| `0x3C` | `bltu`   | B      | `rs1` `rs2` `imm` | `if R[rs1] < R[rs2]: PC := PC+imm`                | branch if less than unsigned |
+| `0x3D` | `bgeu`   | B      | `rs1` `rs2` `imm` | `if R[rs1] >= R[rs2]: PC := PC+imm`               | branch if greater or equal unsigned |
+| `0x3E` | `addw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1] + R[rs2]))`              | add word |
+| `0x3F` | `subw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1] - R[rs2]))`              | subtract word |
+| `0x40` | `mulw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1] * R[rs2]))`              | multiply word |
+| `0x41` | `divw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1]) / S32(R[rs2]))`         | divide word |
+| `0x42` | `divuw`  | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(U32(R[rs1]) / U32(R[rs2]))`         | divide word unsigned |
+| `0x43` | `remw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1]) % S32(R[rs2]))`         | remainder word |
+| `0x44` | `remuw`  | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(U32(R[rs1]) % U32(R[rs2]))`         | remainder word unsigned |
+| `0x45` | `sllw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1] << (R[rs2] & 31)))`      | shift left word |
+| `0x46` | `srlw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(U32(R[rs1]) >> (R[rs2] & 31)))` | shift right logical word |
+| `0x47` | `sraw`   | R      | `rd`  `rs1` `rs2` | `R[rd] := S64(S32(R[rs1]) >> (R[rs2] & 31))`      | shift right arithmetic word |
+| `0x48` | `addiw`  | I      | `rd`  `rs1` `imm` | `R[rd] := S64(S32(R[rs1] + imm))`                 | add immediate word |
+| `0x49` | `slliw`  | I      | `rd`  `rs1` `imm` | `R[rd] := S64(S32(R[rs1] << (imm & 31)))`         | shift left immediate word |
+| `0x4A` | `srliw`  | I      | `rd`  `rs1` `imm` | `R[rd] := S64(S32(U32(R[rs1]) >> (imm & 31)))`    | shift right logical immediate word |
+| `0x4B` | `sraiw`  | I      | `rd`  `rs1` `imm` | `R[rd] := S64(S32(R[rs1]) >> (imm & 31))`         | shift right arithmetic immediate word |
+| `0x4C` | `flw`    | I      | `rd`  `rs1` `imm` | `F[rd] := box(M[R[rs1] + 4*imm:4])`               | load word float |
+| `0x4D` | `fsw`    | S      | `rs1` `rs2` `imm` | `M[R[rs1] + 4*imm:4] := low32(F[rs2])`            | store word float |
+| `0x4E` | `fcvt.s.w` | R    | `rd`  `rs1`       | `F[rd] := box(f32(S32(R[rs1])))`                  | convert word to fp32 |
+| `0x4F` | `fcvt.w.s` | R    | `rd`  `rs1`       | `R[rd] := S64(f32_to_i32(unbox(F[rs1])))`         | convert fp32 to word |
+| `0x50` | `fadd.s` | R      | `rd`  `rs1` `rs2` | `F[rd] := box(f32(F[rs1]) + f32(F[rs2]))`         | fp32 add |
+| `0x51` | `fsub.s` | R      | `rd`  `rs1` `rs2` | `F[rd] := box(f32(F[rs1]) - f32(F[rs2]))`         | fp32 subtract |
+| `0x52` | `fmul.s` | R      | `rd`  `rs1` `rs2` | `F[rd] := box(f32(F[rs1]) * f32(F[rs2]))`         | fp32 multiply |
+| `0x53` | `fdiv.s` | R      | `rd`  `rs1` `rs2` | `F[rd] := box(f32(F[rs1]) / f32(F[rs2]))`         | fp32 divide |
+| `0x54` | `fsqrt.s` | R     | `rd`  `rs1`       | `F[rd] := box(sqrtf(f32(F[rs1])))`                | fp32 square root |
+| `0x5B` | `feq.s`  | R      | `rd`  `rs1` `rs2` | `R[rd] := (f32(F[rs1]) == f32(F[rs2])) ? 1 : 0`   | fp32 compare equal |
+| `0x5C` | `flt.s`  | R      | `rd`  `rs1` `rs2` | `R[rd] := (f32(F[rs1]) < f32(F[rs2])) ? 1 : 0`    | fp32 compare less |
+| `0x5D` | `fle.s`  | R      | `rd`  `rs1` `rs2` | `R[rd] := (f32(F[rs1]) <= f32(F[rs2])) ? 1 : 0`   | fp32 compare less or equal |
+| `0x5E` | `fabs.s` | R      | `rd`  `rs1`       | `F[rd] := box(fabsf(f32(F[rs1])))`                | fp32 absolute value |
+| `0x5F` | `fneg.s` | R      | `rd`  `rs1`       | `F[rd] := box(-f32(F[rs1]))`                      | fp32 negate |
+| `0x60` | `fmax.s` | R      | `rd`  `rs1` `rs2` | `F[rd] := box(fmaxf(f32(F[rs1]), f32(F[rs2])))`   | fp32 maximum |
+| `0x61` | `fmin.s` | R      | `rd`  `rs1` `rs2` | `F[rd] := box(fminf(f32(F[rs1]), f32(F[rs2])))`   | fp32 minimum |
+| `0x62` | `fmv.s`  | R      | `rd`  `rs1`       | `F[rd] := box(f32(F[rs1]))`                       | copy floating register |
+| `0x63` | `fmadd`  | R4     | `rd` `rs1` `rs2` `rs3` | `F[rd] := F[rs1] * F[rs2] + F[rs3]`        | fused multiply-add |
+| `0x64` | `fmsub`  | R4     | `rd` `rs1` `rs2` `rs3` | `F[rd] := F[rs1] * F[rs2] - F[rs3]`        | fused multiply-subtract |
+| `0x65` | `fnmadd` | R4     | `rd` `rs1` `rs2` `rs3` | `F[rd] := -(F[rs1] * F[rs2]) - F[rs3]`     | fused negate multiply-add |
+| `0x66` | `fnmsub` | R4     | `rd` `rs1` `rs2` `rs3` | `F[rd] := -(F[rs1] * F[rs2]) + F[rs3]`     | fused negate multiply-subtract |
+| `0x67` | `fmadd.s` | R4    | `rd` `rs1` `rs2` `rs3` | `F[rd] := box(f32(F[rs1]) * f32(F[rs2]) + f32(F[rs3]))` | fp32 fused multiply-add |
+| `0x68` | `fmsub.s` | R4    | `rd` `rs1` `rs2` `rs3` | `F[rd] := box(f32(F[rs1]) * f32(F[rs2]) - f32(F[rs3]))` | fp32 fused multiply-subtract |
+| `0x69` | `fnmadd.s` | R4   | `rd` `rs1` `rs2` `rs3` | `F[rd] := box(-(f32(F[rs1]) * f32(F[rs2])) - f32(F[rs3]))` | fp32 fused negate multiply-add |
+| `0x6A` | `fnmsub.s` | R4   | `rd` `rs1` `rs2` `rs3` | `F[rd] := box(-(f32(F[rs1]) * f32(F[rs2])) + f32(F[rs3]))` | fp32 fused negate multiply-subtract |
 
-Loads read from base register plus offset scaled to access size units,
-stores write the same way. Unaligned addresses trap. Address arithmetic
-wraps modulo 2^64, so negative offsets address below the base.
+Loads/stores use base plus offset in access-size units. Unaligned access
+traps; address arithmetic wraps modulo 2^64.
 
-`ini`/`inf` read one stdin line each (decimal or hex integers for `ini`,
-doubles for `inf`, surrounding whitespace is fine). Output is flushed
-before blocking on input. `EOF`, overlong lines and unparsable text are
-fatal, same as bad memory.
+`ini`/`inf` read one stdin line (decimal or hex integer, or double).
+Output is flushed before blocking. `EOF`, overlong lines and bad text are
+fatal.
 
-Integer divide by zero gives all bits set. Remainder by zero gives back
-the dividend. Most negative divided by minus one gives most negative
-with zero remainder. Unsigned division has no overflow case, only the
-divide-by-zero rules carry over. This matches RISC-V and keeps behavior
-defined for every input.
+Divide by zero gives all bits set; remainder by zero returns the
+dividend. Most negative divided by minus one gives most negative with
+zero remainder. Unsigned division only has the divide-by-zero rules.
 
-`call`/`ret` use the value stack, not a link register. `jal` stays for
-local jumps with link, `jalr x0, x6, 0` returns through one. Underflow
-on `ret` and misaligned targets are fatal, same as `popqr`/`popqv`.
+`call`/`ret` use the value stack. `jal` links locally;
+`jalr x0, x6, 0` returns through a register. Underflow and a misaligned
+target are fatal.
+
+## Word integer operations
+
+W operations read the low 32 bits, produce a 32 bit result and
+sign-extend it. Results wrap modulo 2^32 before extension; shift counts
+use the low 5 bits. `divw`/`remw` keep the 64 bit overflow rules.
+`lwu` zero-extends; `sltu`, `bltu` and `bgeu` compare unsigned.
+
+## Single precision floats
+
+`fmax.s`/`fmin.s` follow IEEE NaN rules. `fcvt.w.s` truncates and
+saturates; R4 forms round once. There are no transcendental
+instructions: `sin`, `cos`, `atan2`, `log` and `pow` are software.
+[mandelbulb.asm](../examples/vm/mandelbulb.asm) has small single
+precision implementations built from arithmetic, `fsqrt.s` and `fmadd.s`.
 
 ## Narrow loads and stores
 
-`ld`/`st` move whole 8 byte registers, the immediate counts in units
-of 8. `lw`/`sw` move 4 bytes, the immediate counts in units of 4:
-
-- `lw rd, rs1, imm` reads 4 bytes at `R[rs1]+4*imm` and sign-extends
-  the 32 bit value into 64 bits.
-- `sw rs1, rs2, imm` writes the low 4 bytes of `R[rs2]` at
-  `R[rs1]+4*imm` and leaves the other 4 bytes of the slot alone.
-  It never widens, so packing two 32 bit values side by side works.
-- `fld`/`fst` always move 8 bytes raw between memory and float
-  registers, no conversion. There are no narrow float ops.
-
-Unaligned addresses trap, the assembler rejects misaligned `:name`
-uses outright. Sign extension only happens on `lw`, never on stores.
+`ld`/`st` use 8 byte units; `lw`/`sw` use 4 byte units. `lw`
+sign-extends, `lwu` zero-extends, and `sw` writes only the low 32 bits.
+`fld`/`fst` move raw doubles; `flw`/`fsw` move boxed singles. Unaligned
+access traps and the assembler rejects misaligned `:name` uses.
 
 ## Building constants
 
-`addi` can build up to 19 immediate bits.
-`lui` combined with `addi` can build up to 32 immediate bits.
-Building more than 32 immediate bits requires using data section or
-shifts.
-
-`auipc` can be used in position-independent code to read `pc` and
-address data relatively.
+`addi` builds 19 immediate bits. `lui` takes a 32 bit value with low 12
+bits zero; with `addi` it builds any 32 bit constant. Larger constants
+need the data section or shifts. `auipc` reads `pc` for relative data.
 
 ## Host calls
 
@@ -181,33 +219,24 @@ return value is passed in `x1`.
 
 | Number | Name    | Arguments    | Description |
 | ------:|:------- |:------------ | ----------- |
-|    `0` | `exit`  | code         | End the program with `code & 0xFF` |
+|    `0` | `exit`  | code         | End the program, host reads `code & 0xFF` from `x2` |
 |    `1` | `write` | fd, buf, len | Write `len` bytes from `buf` to `fd`, return bytes written |
 |    `2` | `flush` | —            | Wait for the host to present a frame, return 0 |
 
-Write only allows standard output (`1`) and standard error (`2`).
-Other file numbers are fatal. The address range must lie inside
-guest memory. Host errors come back as they are.
+`write` allows stdout (`1`) and stderr (`2`); other fds are fatal. The
+range must be guest memory. Host errors are returned as-is.
 
-`flush` is the frame boundary for the simple framebuffer. It returns
-0 in `x1` and makes `wst_vm_execute` report `WST_VM_RUN_FLUSH`; the
-host presents a frame, then resumes execution. The vm example paces
-that presentation to the host refresh, so back-to-back flushes run
-at most once per refresh. A host without a display may ignore it.
+`flush` returns 0 and makes `wst_vm_execute` report
+`WST_VM_RUN_FLUSH`; the host presents a frame and resumes. The vm
+example paces frames to the host refresh.
 
 ## Program files
 
-Files start with a tiny header that mirrors ELF field names
-(`WstProgHeader`/`WstProgSegment` in `toys/prog.h`). Magic bytes
-are `7f 57 53 54`, version is `1`. The header points at an array of
-segments and names the entry offset. The assembler links one text
-segment at address zero and one data segment right after the code
-(first 8-aligned address past it). Each segment header contains file
-offset, target address, file size and memory size. The loader checks the whole
-file before touching memory. Magic, version, header bounds, segment bounds,
-address cap, overlapping segments and a sane aligned entry all get verified
-first. Then segments copy over and the gap between file size and memory size
-stays zero.
+The header mirrors ELF names (`WstProgHeader`/`WstProgSegment` in
+`toys/prog.h`): magic `7f 57 53 54`, version `1`, segment array and
+entry. The assembler emits text at address zero and data after it,
+8-aligned. The loader validates the header, segments, address cap,
+overlaps and entry before copying; the bss gap stays zero.
 
 ## Assembly syntax
 
@@ -224,39 +253,28 @@ ret
 section .data
 msg: str "hello, world!\n"
 pi: f64 3.14159
+half: f32 0.5
 n: u64 0x100
 w: u32 42
 blob: bytes 7f 45 4c 46
 ```
 
-- Code lines are `mnemonic operands...` with `x0`-`x7`/`f0`-`f7`
-  registers and decimal or hex numbers, or a `:label` definition alone
-  on a line. Labels address the start of the next instruction.
-- Data entries are `name: <type> <value>` on one line. Types are
-  `u64`/`u32` (numbers), `f64` (double), `str "..."` with `\n`,
-  `\\`, `\"`, `\0`, `\t` escapes, and `bytes` with hex pairs like
-  `01 02 ff` (spaces optional). `u64`/`f64` align to 8 bytes,
-  `u32` to 4, strings and bytes pack exact bytes with no NUL added.
-  Numbers store little-endian, `bytes` pairs are in memory order.
-- Code and data share one namespace: redefining a name is an error.
-- A `:name` operand refers to a label or a data entry. First pass
-  emits words and records every `:name` as a fixup, second pass
-  patches the machine code once code length (therefore, data addresses)
-  is known. `B`/`J` immediates (`beq`, `jal`, `call`) are PC-relative
-  (`target - ins_addr`), `I`/`S`/`U` immediates (`ld`, `addi`, `st`,
-  `lui`) are absolute addresses. `lui` needs a 4096-aligned address.
-  Unknown names and out-of-range immediates are errors.
+- Code: `mnemonic operands...`, registers `x0`-`x7`/`f0`-`f7`,
+  decimal or hex numbers, or `:label` on its own line. Labels point at
+  the next instruction.
+- Data: `name: <type> <value>`. Types are `u64`/`u32`, `f32`/`f64`,
+  `str "..."` with `\n`, `\\`, `\"`, `\0`, `\t` escapes, and `bytes`
+  with hex pairs. `u64`/`f64` align to 8, `u32`/`f32` to 4; strings and
+  bytes are exact with no NUL. Numbers are little-endian. Load `f32`
+  with `flw`, not `fld`.
+- Names are shared between code and data; redefinition is an error.
+- `:name` is a label or data address. The first pass records fixups;
+  the second patches them once code length is known. `B`/`J`
+  (`beq`, `jal`, `call`) are PC-relative, `I`/`S`/`U` (`ld`, `addi`,
+  `st`, `lui`) are absolute. `lui` needs 4096 alignment. Unknown or
+  out-of-range names are errors.
 
-The disassembler (`asm --disasm`, `wst_vm_disasm`) prints the whole
-code segment as assembly text, with `:_start` at the entry and
-`:label_<addr>` at branch and jump targets. It emits the data segment
-as `bytes` lines, so its output assembles back to an identical
-program file. It uses `wst_vm_decode_word` and `wst_vm_instr_text`,
-the same decode and text the interpreter uses.
-
-## Example program
-
-See [prog.asm](examples/vm/prog.asm) for the full ISA and
-[circle.asm](examples/vm/circle.asm) for the simple framebuffer.
-The circle demo centers a 201x201 box, fills pixels with
-`dx*dx + dy*dy <= 100*100` and flushes once per frame.
+The disassembler (`asm --disasm`, `wst_vm_disasm`) prints code with
+`:_start` and `:label_<addr>` at jump targets, and data as `bytes`
+lines, so its output assembles back identically. It uses the same
+`wst_vm_decode_word` and `wst_vm_instr_text` as the interpreter.

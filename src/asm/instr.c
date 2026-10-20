@@ -204,6 +204,7 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
     unsigned rd = 0;
     unsigned rs1 = 0;
     unsigned rs2 = 0;
+    unsigned rs3 = 0;
     int64_t imm = 0;
     size_t tok_idx = 0;
 
@@ -216,7 +217,8 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
         if (slot != WST_VM_OPND_IMM) {
             bool is_float = (desc->fregs & slot) != 0;
             unsigned *dst = slot == WST_VM_OPND_RD ? &rd :
-                            slot == WST_VM_OPND_RS1 ? &rs1 : &rs2;
+                            slot == WST_VM_OPND_RS1 ? &rs1 :
+                            slot == WST_VM_OPND_RS2 ? &rs2 : &rs3;
 
             if (!asm_parse_reg(tok, is_float, dst)) {
                 LOG_E("line %zu: bad %s register '%s'",
@@ -265,6 +267,8 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
         word |= (uint32_t)rs1 << fmt->rs1_shift;
     if (fmt->rs2_shift != 0)
         word |= (uint32_t)rs2 << fmt->rs2_shift;
+    if (fmt->rs3_shift != 0)
+        word |= (uint32_t)rs3 << fmt->rs3_shift;
     if (fmt->imm_shift != 0)
         word = asm_set_imm(word, desc->format, imm);
 

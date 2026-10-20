@@ -11,9 +11,6 @@
 #define U(sz) uint ## sz ## _t
 #define S(sz) int ## sz ## _t
 
-/* Raw register aliases, need `vm` in scope. No x0 handling here,
- * decoded operands go through VM_REG_READ/WRITE, these are for
- * fixed roles: stack pointer and ecall args. */
 #define R_x0 (vm->regs[0])
 #define R_x1 (vm->regs[1])
 #define R_x2 (vm->regs[2])
@@ -24,7 +21,6 @@
 #define R_x7 (vm->regs[7])
 #define R_SP R_x7
 
-/* ecall convention: number in x1, args in x2-x4, result in x1. */
 #define ECALL_NUM  R_x1
 #define ECALL_ARG0 R_x2
 #define ECALL_ARG1 R_x3
@@ -33,20 +29,20 @@
 
 
 /** Read guest memory, one accessor per operand size. */
-uint64_t vm_mem_read64(WstVmContext *ctx, uint64_t addr);
-uint32_t vm_mem_read32(WstVmContext *ctx, uint64_t addr);
+uint64_t vm_mem_read64(WstVm *vm, uint64_t addr);
+uint32_t vm_mem_read32(WstVm *vm, uint64_t addr);
 
 /** Write guest memory, one accessor per operand size. */
-void vm_mem_write64(WstVmContext *ctx, uint64_t addr, uint64_t value);
-void vm_mem_write32(WstVmContext *ctx, uint64_t addr, uint32_t value);
+void vm_mem_write64(WstVm *vm, uint64_t addr, uint64_t value);
+void vm_mem_write32(WstVm *vm, uint64_t addr, uint32_t value);
 
 /** Push 8 bytes to guest stack. */
-void vm_stack_push64(WstVm *vm, WstVmContext *ctx, size_t pc, uint64_t value);
+void vm_stack_push64(WstVm *vm, size_t pc, uint64_t value);
 
 /** Pop 8 bytes from guest stack. */
-uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc);
+uint64_t vm_stack_pop64(WstVm *vm, size_t pc);
 
-#define OP(mnemonic) void vm_exec_ ## mnemonic(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
+#define OP(mnemonic) void vm_exec_ ## mnemonic(WstVm *vm, const WstVmInstr *ins)
 
 OP(outi);
 OP(outf);
@@ -100,13 +96,57 @@ OP(fsqrt);
 OP(feq);
 OP(flt);
 OP(fle);
+OP(lwu);
+OP(slt);
+OP(sltu);
+OP(bltu);
+OP(bgeu);
+OP(addw);
+OP(subw);
+OP(mulw);
+OP(divw);
+OP(divuw);
+OP(remw);
+OP(remuw);
+OP(sllw);
+OP(srlw);
+OP(sraw);
+OP(addiw);
+OP(slliw);
+OP(srliw);
+OP(sraiw);
+OP(flw);
+OP(fsw);
+OP(fcvt_s_w);
+OP(fcvt_w_s);
+OP(fadd_s);
+OP(fsub_s);
+OP(fmul_s);
+OP(fdiv_s);
+OP(fsqrt_s);
+OP(feq_s);
+OP(flt_s);
+OP(fle_s);
+OP(fabs_s);
+OP(fneg_s);
+OP(fmax_s);
+OP(fmin_s);
+OP(fmv_s);
+OP(fmadd);
+OP(fmsub);
+OP(fnmadd);
+OP(fnmsub);
+OP(fmadd_s);
+OP(fmsub_s);
+OP(fnmadd_s);
+OP(fnmsub_s);
 OP(ecall);
 OP(call);
 OP(ret);
 
 #undef OP
 
-#define ECALL(name) void vm_sys_ ## name(WstVm *vm, WstVmContext *ctx, size_t addr)
+#define ECALL(name) void vm_sys_ ## name(WstVm *vm, size_t addr)
 
 ECALL(exit);
 ECALL(write);
