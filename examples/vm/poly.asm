@@ -23,6 +23,12 @@ section .text
     outf f0
     ret
 
+# Exit successfully.
+:exit
+    addi x1, x0, 0        # WST_VM_SYS_EXIT
+    addi x2, x0, 0        # code
+    ecall
+
 :_start
     addi x1, x0, :msg_intro
     call :print
@@ -58,7 +64,7 @@ section .text
     fsub  f0, f6, f4
     addi  x1, x0, :msg_x2
     call  :print_root
-    hlt   0
+    jal  x0, :exit
 
 :one_root
     addi  x1, x0, :msg_one
@@ -68,12 +74,12 @@ section .text
     fdiv  f0, f0, f5
     addi  x1, x0, :msg_x
     call  :print_root
-    hlt   0
+    jal  x0, :exit
 
 :no_roots
     addi x1, x0, :msg_none
     call :print
-    hlt  0
+    jal  x0, :exit
 
 :linear
     feq  x1, f1, f7        # b == 0 ?
@@ -85,19 +91,19 @@ section .text
     fdiv  f0, f0, f1       # / b
     addi  x1, x0, :msg_x
     call  :print_root
-    hlt   0
+    jal  x0, :exit
 
 :constant
     feq  x1, f2, f7        # c == 0 ?
     bne  x1, x0, :any_x
     addi x1, x0, :msg_no_sol
     call :print
-    hlt  0
+    jal  x0, :exit
 
 :any_x
     addi x1, x0, :msg_any_x
     call :print
-    hlt  0
+    jal  x0, :exit
 
 section .data
     fp_zero:        f64 0.0

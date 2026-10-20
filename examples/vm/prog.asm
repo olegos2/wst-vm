@@ -268,7 +268,9 @@ section .text
     outi x4               # 100, preserved
     outi x5               # 200, preserved
     call :_test_in
-    hlt  0
+    addi x1, x0, 0        # WST_VM_SYS_EXIT
+    addi x2, x0, 0        # success
+    ecall
 
 section .data
     m1:     u64 0

@@ -29,15 +29,17 @@ static void vm_cleanup(void)
     wst_vm_context_free(&ctx);
 }
 
-/* Run guest instructions until it asks for the next frame. */
-static bool vm_run_until_flush(WstVm *machine, WstVmContext *context)
+/* Run guest instructions until it asks for the next frame or stops. */
+static WstVmRet vm_run_until_flush(WstVm *machine, WstVmContext *context)
 {
     for (;;) {
         WstVmInstr instr = { 0 };
         if (!wst_vm_decode(machine, context, &instr))
-            return false;
-        if (wst_vm_execute(machine, context, &instr) == WST_VM_RUN_FLUSH)
-            return true;
+            return WST_VM_RUN_ERROR;
+
+        WstVmRet ret = wst_vm_execute(machine, context, &instr);
+        if (ret != WST_VM_RUN_CONTINUE)
+            return ret;
     }
 }
 
@@ -68,11 +70,18 @@ static int run_fb(WstVm *machine, WstVmContext *context)
     SetTargetFPS(refresh > 0 ? refresh : VM_FB_DEFAULT_FPS);
 
     bool ok = true;
+    int guest_code = EXIT_SUCCESS;
     while (!WindowShouldClose()) {
-        if (!vm_run_until_flush(machine, context)) {
+        WstVmRet ret = vm_run_until_flush(machine, context);
+        if (ret == WST_VM_RUN_ERROR) {
             ok = false;
             break;
         }
+        if (ret == WST_VM_RUN_EXIT) {
+            guest_code = machine->exit_code;
+            break;
+        }
+
         UpdateTexture(texture, pixels);
         BeginDrawing();
         ClearBackground(BLACK);
@@ -82,7 +91,7 @@ static int run_fb(WstVm *machine, WstVmContext *context)
 
     UnloadTexture(texture);
     CloseWindow();
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    return ok ? guest_code : EXIT_FAILURE;
 }
 
 int main(int argc, char **argv)
@@ -203,16 +212,10 @@ int main(int argc, char **argv)
     ctx.mem_max = (size_t)mem_mb * 1024 * 1024;
     ctx.stack.size = (size_t)stack_kb * 1024;
 
-    if (!wst_vm_init(&vm))
-        return EXIT_FAILURE;
-    atexit(vm_cleanup);
-
     if (!wst_vm_context_load(&ctx, prog_path))
         return EXIT_FAILURE;
-    vm.pc = ctx.entry;
-    vm.regs[WST_VM_REG_SP] = (uint64_t)ctx.stack.top;
-    /* Boot handoff, x1 points at the firmware config. */
-    vm.regs[1] = (uint64_t)ctx.config_addr;
+    wst_vm_init(&vm, &ctx);
+    atexit(vm_cleanup);
 
     if (ctx.config.fb_addr != 0)
         return run_fb(&vm, &ctx);
@@ -221,7 +224,8 @@ int main(int argc, char **argv)
     while (1) {
         if (!wst_vm_decode(&vm, &ctx, &instr))
             return EXIT_FAILURE;
-        /* Headless, there is no frame to present. */
-        (void)wst_vm_execute(&vm, &ctx, &instr);
+        WstVmRet ret = wst_vm_execute(&vm, &ctx, &instr);
+        if (ret == WST_VM_RUN_EXIT)
+            return vm.exit_code;
     }
 }

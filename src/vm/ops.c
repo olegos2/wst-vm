@@ -171,13 +171,6 @@ static bool vm_parse_end(const char *start, const char *end)
     return *end == '\0';
 }
 
-void vm_exec_hlt(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
-{
-    (void)vm;
-    (void)ctx;
-    exit((int)ins->imm);
-}
-
 void vm_exec_outi(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 {
     (void)ctx;
@@ -385,7 +378,8 @@ void vm_sys_exit(WstVm *vm, WstVmContext *ctx, size_t addr)
 {
     (void)ctx;
     (void)addr;
-    exit((int)(ECALL_ARG0 & 0xFFu));
+
+    vm->exit_code = (int)(ECALL_ARG0 & 0xFFu);
 }
 
 void vm_sys_write(WstVm *vm, WstVmContext *ctx, size_t addr)

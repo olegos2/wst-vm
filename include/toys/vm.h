@@ -65,7 +65,7 @@
  * Instruction set, enum values match opcode bytes.
  */
 typedef enum {
-    WST_VM_HLT      = 0x00, /* halt with exit code */
+    /* 0x00 retired */
     WST_VM_OUTI     = 0x01, /* print GPR as decimal */
     WST_VM_OUTF     = 0x02, /* print FP register as double */
     WST_VM_LD       = 0x03, /* load 64-bit, sign-extended */
@@ -218,16 +218,22 @@ typedef struct WstVm {
     double fp[WST_VM_NUM_FP];
     /** Program counter */
     size_t pc;
+    /** Guest exit code, valid after `WST_VM_RUN_EXIT`. */
+    int exit_code;
 } WstVm;
 
 /**
- * Result of one execution step.
+ * Result of running the vm.
  */
 typedef enum {
     /** Instruction finished, keep running. */
     WST_VM_RUN_CONTINUE = 0,
     /** Guest asked the host for a frame with `flush`. */
     WST_VM_RUN_FLUSH,
+    /** Guest stopped with the `exit` host call. */
+    WST_VM_RUN_EXIT,
+    /** Host could not decode the next instruction. */
+    WST_VM_RUN_ERROR,
 } WstVmRet;
 
 /**
@@ -298,8 +304,8 @@ typedef struct {
  * remaining fields, copies the struct into guest memory at
  * `config_addr` and places it below the framebuffer.
  *
- * After load set `pc` to `entry`, sp to `stack.top` and `x1` to
- * `config_addr`.
+ * After load pass the context to `wst_vm_init` to set the boot
+ * registers.
  */
 typedef struct WstVmContext {
     uint8_t *mem;
@@ -346,11 +352,12 @@ typedef struct {
 extern const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES];
 
 /**
- * Zero the state. Infallible, kept boolean for a stable API.
+ * Reset the vm and apply boot state from a loaded context.
  *
- * @return `true` always.
+ * Zeroes the integer and fp registers, sets `pc` to `ctx->entry`,
+ * `x7` to `ctx->stack.top` and `x1` to `ctx->config_addr`.
  */
-bool wst_vm_init(WstVm *vm);
+void wst_vm_init(WstVm *vm, const WstVmContext *ctx);
 
 /**
  * Load program file into a fresh address space with the stack
@@ -358,7 +365,7 @@ bool wst_vm_init(WstVm *vm);
  *
  * Honors `mem_max`, `stack.size` and the framebuffer request in
  * `ctx->config`, then fills `config_addr`, `config` and the stack
- * range. The guest should start with `x1` set to `config_addr`.
+ * range. Pass the loaded context to `wst_vm_init` for the boot state.
  *
  * @return `true` on success, `false` otherwise.
  */
@@ -395,9 +402,15 @@ bool wst_vm_instr_text(const WstVmInstr *ins, const char *imm_text,
 
 /**
  * Execute one decoded instruction, moving pc past it.
- * Stack errors, bad memory and `hlt` are fatal.
+ * Stack and memory errors are fatal.
  *
- * @return request to caller on how to continue execution.
+ * A `flush` host call returns `WST_VM_RUN_FLUSH`; the host presents
+ * a frame, then calls this again. Flushes therefore run at the pace
+ * the host presents frames. The `exit` host call returns
+ * `WST_VM_RUN_EXIT` with the code in `vm->exit_code`.
+ *
+ * @return `WST_VM_RUN_CONTINUE` normally, `WST_VM_RUN_FLUSH` after
+ * a flush request, `WST_VM_RUN_EXIT` after an exit request.
  */
 WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins);
 

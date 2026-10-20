@@ -48,7 +48,6 @@ uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc);
 
 #define OP(mnemonic) void vm_exec_ ## mnemonic(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
 
-OP(hlt);
 OP(outi);
 OP(outf);
 OP(ini);

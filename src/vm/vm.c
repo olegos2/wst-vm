@@ -153,16 +153,19 @@ uint64_t vm_stack_pop64(WstVm *vm, WstVmContext *ctx, size_t pc)
     return vm_mem_read64(ctx, sp);
 }
 
-bool wst_vm_init(WstVm *vm)
+void wst_vm_init(WstVm *vm, const WstVmContext *ctx)
 {
     assert(vm != NULL);
+    assert(ctx != NULL);
 
     for (size_t i = 0; i < WST_VM_NUM_GPR; i++)
         vm->regs[i] = 0;
     for (size_t i = 0; i < WST_VM_NUM_FP; i++)
         vm->fp[i] = 0.0;
-    vm->pc = 0;
-    return true;
+    vm->pc = ctx->entry;
+    vm->exit_code = 0;
+    vm->regs[WST_VM_REG_SP] = (uint64_t)ctx->stack.top;
+    vm->regs[1] = (uint64_t)ctx->config_addr;
 }
 
 bool wst_vm_context_load(WstVmContext *ctx, const char *path)
@@ -399,14 +402,18 @@ WstVmRet wst_vm_execute(WstVm *vm, WstVmContext *ctx, const WstVmInstr *ins)
     WstVmInstrHandler handler = wst_vm_op_table[(unsigned)ins->op].handler;
     assert(handler != NULL);
 
-    /* Flush is the frame boundary, report it after the call. */
-    bool flush = ins->op == WST_VM_ECALL &&
-                 ECALL_NUM == WST_VM_SYS_FLUSH;
+    WstVmRet ret = WST_VM_RUN_CONTINUE;
+    if (ins->op == WST_VM_ECALL) {
+        if (ECALL_NUM == WST_VM_SYS_FLUSH)
+            ret = WST_VM_RUN_FLUSH;
+        else if (ECALL_NUM == WST_VM_SYS_EXIT)
+            ret = WST_VM_RUN_EXIT;
+    }
 
     vm->pc = ins->addr + WST_VM_INSTR_SIZE;
     handler(vm, ctx, ins);
 
-    return flush ? WST_VM_RUN_FLUSH : WST_VM_RUN_CONTINUE;
+    return ret;
 }
 
 void wst_vm_close(WstVm *vm)
@@ -415,4 +422,5 @@ void wst_vm_close(WstVm *vm)
         return;
 
     vm->pc = 0;
+    vm->exit_code = 0;
 }

@@ -42,8 +42,9 @@ the address wraps modulo 2^64 (`R[x7]-8` for `-8`).
 
 ## Boot state
 
-`pc` holds the entry address, `x7` the stack top and `x1` the
-address of `WstVmConfig`. Every other register reads as zero.
+`wst_vm_init` sets `pc` to the entry address, `x7` to the stack
+top and `x1` to the address of `WstVmConfig`. Every other register
+reads as zero.
 
 ## Config handoff
 

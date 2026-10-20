@@ -73,7 +73,6 @@ All integer arithmetic wraps modulo 2^64.
 
 | Opcode | Mnemonic | Format | Operands          | Semantics                                         | Stands for |
 | ------:|:-------- | ------ |:----------------- | ------------------------------------------------- | ---------- |
-| `0x00` | `hlt`    | I      | `imm`             | `exit(imm)`                                       | halt |
 | `0x01` | `outi`   | I      | `rs1`             | `print(S64(R[rs1]))`                              | output integer |
 | `0x02` | `outf`   | I      | `rs1`             | `print(F[rs1])`                                   | output float |
 | `0x03` | `ld`     | I      | `rd`  `rs1` `imm` | `R[rd] := M[R[rs1] + 8*imm:8]`                    | load doubleword |

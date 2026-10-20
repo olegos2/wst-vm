@@ -33,4 +33,6 @@ section .text
     addi x5, x5, 1         # i++
     jal  x0, :loop
 :done
-    hlt  0
+    addi x1, x0, 0        # WST_VM_SYS_EXIT
+    addi x2, x0, 0        # success
+    ecall

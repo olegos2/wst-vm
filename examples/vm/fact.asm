@@ -22,4 +22,6 @@ section .text
     ini  x1
     call :fact
     outi x1
-    hlt  0
+    addi x1, x0, 0        # WST_VM_SYS_EXIT
+    addi x2, x0, 0        # success
+    ecall
