@@ -2,7 +2,7 @@
 
 Guest memory is one flat zeroed byte array reserved once on load,
 `mem_size` bytes (default 256 MiB, `--mem-max` in MiB, zero means
-default). It never grows; every access past the reservation is fatal.
+default). It never grows. Every access past the reservation is fatal.
 The instruction set is in [isa](isa.md).
 
 ```

@@ -16,8 +16,7 @@
 #   loop:
 #       flush
 #
-# Bad config, no/unsupported framebuffer and sizes below 201x201
-# print a reason to stderr and exit with code 3, 1 or 2.
+# + bad config handling
 #
 # x2 is the pixel cursor, x3 is dy^2, x4 is a temporary,
 # x5 is the row stride, x6 is white, x1 is dx or dy.
