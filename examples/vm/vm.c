@@ -17,6 +17,10 @@
 #define VM_DEFAULT_FB_WIDTH 320
 #define VM_DEFAULT_FB_HEIGHT 240
 
+/* Default and largest integer window scale. */
+#define VM_DEFAULT_FB_SCALE 1
+#define VM_FB_MAX_SCALE 8
+
 /* Fallback frame rate when the monitor reports none. */
 #define VM_FB_DEFAULT_FPS 60
 
@@ -44,13 +48,15 @@ static WstVmRet vm_run_until_flush(WstVm *machine, WstVmContext *context)
 }
 
 /* Show the guest framebuffer in a raylib window until it closes. */
-static int run_fb(WstVm *machine, WstVmContext *context)
+static int run_fb(WstVm *machine, WstVmContext *context, int scale)
 {
     int width = (int)context->config.fb_width;
     int height = (int)context->config.fb_height;
+    int window_width = width * scale;
+    int window_height = height * scale;
     uint8_t *pixels = context->mem + (size_t)context->config.fb_addr;
 
-    InitWindow(width, height, "wst-vm");
+    InitWindow(window_width, window_height, "wst-vm");
     if (!IsWindowReady()) {
         LOG_E("cannot open fb window");
         return EXIT_FAILURE;
@@ -64,6 +70,7 @@ static int run_fb(WstVm *machine, WstVmContext *context)
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
     };
     Texture2D texture = LoadTextureFromImage(image);
+    SetTextureFilter(texture, TEXTURE_FILTER_POINT);
 
     int refresh = GetMonitorRefreshRate(GetCurrentMonitor());
     /* Pseudo vsync, EndDrawing waits for the next frame slot. */
@@ -85,7 +92,7 @@ static int run_fb(WstVm *machine, WstVmContext *context)
         UpdateTexture(texture, pixels);
         BeginDrawing();
         ClearBackground(BLACK);
-        DrawTexture(texture, 0, 0, WHITE);
+        DrawTextureEx(texture, (Vector2){ 0 }, 0.0f, (float)scale, WHITE);
         EndDrawing();
     }
 
@@ -103,6 +110,7 @@ int main(int argc, char **argv)
     int stack_kb = 0;
     int fb_width = 0;
     int fb_height = 0;
+    int fb_scale = 0;
     const char *prog_path = NULL;
 
     ArgOption opts[] = {
@@ -153,6 +161,12 @@ int main(int argc, char **argv)
             .description = "framebuffer height (default 240, max 480)",
         },
         {
+            .type = ARG_INT,
+            .dest = &fb_scale,
+            .long_name = "--fb-scale",
+            .description = "integer window scale (default 1, max 8)",
+        },
+        {
             .type = ARG_POSITIONAL,
             .dest = &prog_path,
             .long_name = "prog_filename",
@@ -195,6 +209,8 @@ int main(int argc, char **argv)
         fb_width = VM_DEFAULT_FB_WIDTH;
     if (fb_height == 0)
         fb_height = VM_DEFAULT_FB_HEIGHT;
+    if (fb_scale == 0)
+        fb_scale = VM_DEFAULT_FB_SCALE;
 
     if (fb) {
         if (fb_width < 1 || fb_height < 1 ||
@@ -202,6 +218,10 @@ int main(int argc, char **argv)
             fb_height > WST_VM_FB_MAX_HEIGHT) {
             fprintf(stderr, "fb size must be 1..%dx%d\n",
                     WST_VM_FB_MAX_WIDTH, WST_VM_FB_MAX_HEIGHT);
+            return EXIT_FAILURE;
+        }
+        if (fb_scale < 1 || fb_scale > VM_FB_MAX_SCALE) {
+            fprintf(stderr, "fb scale must be 1..%d\n", VM_FB_MAX_SCALE);
             return EXIT_FAILURE;
         }
         ctx.config.fb_width = (uint32_t)fb_width;
@@ -218,7 +238,7 @@ int main(int argc, char **argv)
     atexit(vm_cleanup);
 
     if (ctx.config.fb_addr != 0)
-        return run_fb(&vm, &ctx);
+        return run_fb(&vm, &ctx, fb_scale);
 
     WstVmInstr instr = { 0 };
     while (1) {

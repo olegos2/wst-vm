@@ -30,5 +30,5 @@ Framebuffer window:
 
 ```sh
 ./builddir/examples/asm/asm examples/vm/circle.asm circle.bin
-./builddir/examples/vm/vm --fb circle.bin
+./builddir/examples/vm/vm --fb --fb-scale 2 circle.bin
 ```
