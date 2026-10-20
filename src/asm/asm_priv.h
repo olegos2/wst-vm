@@ -114,7 +114,7 @@ bool asm_fix_add(AsmCtx *ctx, size_t off, WstVmInstrFormat fmt,
 /** Free tables and the names in them. */
 void asm_tables_free(AsmCtx *ctx);
 
-/*
+/**
  * Encode one `mnemonic operands...` line with comments stripped.
  * A `:name` operand comes back in `sym_out`, free it after use.
  */
@@ -129,9 +129,7 @@ bool asm_emit_word(AsmCtx *ctx, uint32_t word, size_t lineno);
 bool asm_check_imm(WstVmInstrFormat fmt, int64_t imm, size_t lineno);
 
 /** Patch the imm field of an encoded word. */
-uint32_t asm_set_imm19(uint32_t word, int64_t imm);
-uint32_t asm_set_imm22(uint32_t word, int64_t imm);
-uint32_t asm_set_imm20(uint32_t word, int64_t imm);
+uint32_t asm_set_imm(uint32_t word, WstVmInstrFormat fmt, int64_t imm);
 
 /** Parse and emit one `name: <type> <value>` data line. */
 bool asm_data_entry(AsmCtx *ctx, char *line, size_t lineno);

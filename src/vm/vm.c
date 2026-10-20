@@ -193,33 +193,24 @@ bool wst_vm_decode_word(uint32_t word, size_t addr, WstVmInstr *ins)
     ins->imm = 0;
     ins->addr = addr;
 
-    switch (desc->format) {
-    case WST_VM_INSTR_FORMAT_R:
-        ins->rd = (uint8_t)((word >> 7) & 0x7u);
-        ins->rs1 = (uint8_t)((word >> 10) & 0x7u);
-        ins->rs2 = (uint8_t)((word >> 13) & 0x7u);
-        break;
-    case WST_VM_INSTR_FORMAT_I:
-        ins->rd = (uint8_t)((word >> 7) & 0x7u);
-        ins->rs1 = (uint8_t)((word >> 10) & 0x7u);
-        ins->imm = vm_sign_ext(word >> 13, 19);
-        break;
-    case WST_VM_INSTR_FORMAT_S:
-    case WST_VM_INSTR_FORMAT_B:
-        ins->rs1 = (uint8_t)((word >> 7) & 0x7u);
-        ins->rs2 = (uint8_t)((word >> 10) & 0x7u);
-        ins->imm = vm_sign_ext(word >> 13, 19);
-        break;
-    case WST_VM_INSTR_FORMAT_U:
-        ins->rd = (uint8_t)((word >> 7) & 0x7u);
-        ins->imm = (int64_t)(((uint64_t)(word >> 12) & 0xFFFFFu) << 12);
-        break;
-    case WST_VM_INSTR_FORMAT_J:
-        ins->rd = (uint8_t)((word >> 7) & 0x7u);
-        ins->imm = vm_sign_ext(word >> 10, 22);
-        break;
-    default:
-        break;
+    const WstVmInstrFormatDesc *fmt = &wst_vm_format_table[desc->format];
+
+    if (fmt->rd_shift != 0)
+        ins->rd = (uint8_t)((word >> fmt->rd_shift) & 0x7u);
+    if (fmt->rs1_shift != 0)
+        ins->rs1 = (uint8_t)((word >> fmt->rs1_shift) & 0x7u);
+    if (fmt->rs2_shift != 0)
+        ins->rs2 = (uint8_t)((word >> fmt->rs2_shift) & 0x7u);
+
+    if (fmt->imm_shift != 0) {
+        uint32_t field = word >> fmt->imm_shift;
+
+        if (fmt->imm_signed) {
+            ins->imm = vm_sign_ext(field, fmt->imm_bits);
+        } else {
+            uint32_t mask = (1u << fmt->imm_bits) - 1u;
+            ins->imm = (int64_t)(field & mask) << fmt->imm_shift;
+        }
     }
 
     return true;

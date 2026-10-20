@@ -10,16 +10,6 @@
 #include <string.h>
 
 
-/* Signed 19-bit and 22-bit immediate limits. */
-#define ASM_S19_MIN (-(INT64_C(1) << 18))
-#define ASM_S19_MAX ((INT64_C(1) << 18) - 1)
-#define ASM_S22_MIN (-(INT64_C(1) << 21))
-#define ASM_S22_MAX ((INT64_C(1) << 21) - 1)
-
-/* Largest encodable `lui` constant, high 20 bits shifted by 12. */
-#define ASM_U_MAX ((int64_t)0xfffff000)
-
-
 /* Find an opcode by name of known length. */
 static const WstVmInstrDesc *asm_find_op_n(const char *name, size_t n)
 {
@@ -48,43 +38,42 @@ static unsigned asm_opcode(const WstVmInstrDesc *desc)
 
 bool asm_check_imm(WstVmInstrFormat fmt, int64_t imm, size_t lineno)
 {
-    bool ok = false;
-    switch (fmt) {
-    case WST_VM_INSTR_FORMAT_I:
-    case WST_VM_INSTR_FORMAT_S:
-    case WST_VM_INSTR_FORMAT_B:
-        ok = imm >= ASM_S19_MIN && imm <= ASM_S19_MAX;
-        break;
-    case WST_VM_INSTR_FORMAT_J:
-        ok = imm >= ASM_S22_MIN && imm <= ASM_S22_MAX;
-        break;
-    case WST_VM_INSTR_FORMAT_U:
-        ok = imm >= 0 && imm <= ASM_U_MAX && (imm & 0xFFF) == 0;
-        break;
-    default:
-        ok = false;
-        break;
+    const WstVmInstrFormatDesc *desc = &wst_vm_format_table[fmt];
+
+    int64_t min = 0;
+    int64_t max = 0;
+    bool ok = desc->imm_shift != 0;
+
+    if (ok && desc->imm_signed) {
+        max = (INT64_C(1) << (desc->imm_bits - 1)) - 1;
+        min = -max - 1;
+    } else if (ok) {
+        /* Unsigned immediates scale to the high bits. */
+        ok = (imm & ((INT64_C(1) << desc->imm_shift) - 1)) == 0;
+        max = ((INT64_C(1) << desc->imm_bits) - 1) << desc->imm_shift;
     }
 
-    if (!ok)
+    if (!ok || imm < min || imm > max) {
         LOG_E("line %zu: immediate %" PRId64 " out of range", lineno, imm);
-    return ok;
+        return false;
+    }
+
+    return true;
 }
 
-uint32_t asm_set_imm19(uint32_t word, int64_t imm)
+uint32_t asm_set_imm(uint32_t word, WstVmInstrFormat fmt, int64_t imm)
 {
-    return (word & 0x1FFFu) | ((uint32_t)((uint64_t)imm & 0x7FFFFu) << 13);
-}
+    const WstVmInstrFormatDesc *desc = &wst_vm_format_table[fmt];
 
-uint32_t asm_set_imm22(uint32_t word, int64_t imm)
-{
-    return (word & 0x3FFu) | ((uint32_t)((uint64_t)imm & 0x3FFFFFu) << 10);
-}
+    assert(desc->imm_shift != 0);
 
-uint32_t asm_set_imm20(uint32_t word, int64_t imm)
-{
-    uint64_t hi = ((uint64_t)imm >> 12) & 0xFFFFFu;
-    return (word & 0xFFFu) | ((uint32_t)hi << 12);
+    /* Unsigned immediates store the value shifted right, signed ones as is. */
+    uint64_t field = (uint64_t)(desc->imm_signed
+                                ? imm : imm >> desc->imm_shift);
+    uint32_t mask = (1u << desc->imm_bits) - 1u;
+
+    return (word & ((1u << desc->imm_shift) - 1u)) |
+           ((uint32_t)(field & mask) << desc->imm_shift);
 }
 
 /* Parse one register token, `x0`-`x7` or `f0`-`f7`. */
@@ -268,33 +257,16 @@ bool asm_parse_instr(char *line, size_t lineno, bool allow_sym,
     }
 
     uint32_t word = (uint32_t)asm_opcode(desc);
-    switch (desc->format) {
-    case WST_VM_INSTR_FORMAT_R:
-        word |= (uint32_t)(rd << 7) | (uint32_t)(rs1 << 10) | (uint32_t)(rs2 << 13);
-        break;
-    case WST_VM_INSTR_FORMAT_I:
-        word |= (uint32_t)(rd << 7) | (uint32_t)(rs1 << 10);
-        word = asm_set_imm19(word, imm);
-        break;
-    case WST_VM_INSTR_FORMAT_S:
-    case WST_VM_INSTR_FORMAT_B:
-        word |= (uint32_t)(rs1 << 7) | (uint32_t)(rs2 << 10);
-        word = asm_set_imm19(word, imm);
-        break;
-    case WST_VM_INSTR_FORMAT_U:
-        word |= (uint32_t)(rd << 7);
-        word = asm_set_imm20(word, imm);
-        break;
-    case WST_VM_INSTR_FORMAT_J:
-        word |= (uint32_t)(rd << 7);
-        word = asm_set_imm22(word, imm);
-        break;
-    default:
-        LOG_E("line %zu: bad format", lineno);
-        free(*sym_out);
-        *sym_out = NULL;
-        return false;
-    }
+    const WstVmInstrFormatDesc *fmt = &wst_vm_format_table[desc->format];
+
+    if (fmt->rd_shift != 0)
+        word |= (uint32_t)rd << fmt->rd_shift;
+    if (fmt->rs1_shift != 0)
+        word |= (uint32_t)rs1 << fmt->rs1_shift;
+    if (fmt->rs2_shift != 0)
+        word |= (uint32_t)rs2 << fmt->rs2_shift;
+    if (fmt->imm_shift != 0)
+        word = asm_set_imm(word, desc->format, imm);
 
     *word_out = word;
     *fmt_out = desc->format;

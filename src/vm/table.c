@@ -9,6 +9,34 @@ const WstVmSyscallHandler vm_syscalls[WST_VM_SYSCALL_COUNT] = {
     [WST_VM_SYS_WRITE] = vm_sys_write,
 };
 
+const WstVmInstrFormatDesc wst_vm_format_table[WST_VM_INSTR_FORMAT_COUNT] = {
+    [WST_VM_INSTR_FORMAT_R] = {
+        .rd_shift = 7, .rs1_shift = 10, .rs2_shift = 13,
+    },
+    [WST_VM_INSTR_FORMAT_I] = {
+        .rd_shift = 7, .rs1_shift = 10,
+        .imm_shift = 13, .imm_bits = 19, .imm_signed = true,
+    },
+    [WST_VM_INSTR_FORMAT_S] = {
+        .rs1_shift = 7, .rs2_shift = 10,
+        .imm_shift = 13, .imm_bits = 19, .imm_signed = true,
+    },
+    [WST_VM_INSTR_FORMAT_B] = {
+        .rs1_shift = 7, .rs2_shift = 10,
+        .imm_shift = 13, .imm_bits = 19, .imm_signed = true,
+        .pc_relative = true,
+    },
+    [WST_VM_INSTR_FORMAT_U] = {
+        .rd_shift = 7,
+        .imm_shift = 12, .imm_bits = 20,
+    },
+    [WST_VM_INSTR_FORMAT_J] = {
+        .rd_shift = 7,
+        .imm_shift = 10, .imm_bits = 22, .imm_signed = true,
+        .pc_relative = true,
+    },
+};
+
 const WstVmInstrDesc wst_vm_op_table[WST_VM_NUM_OPCODES] = {
     [WST_VM_HLT]      = { "hlt",      WST_VM_INSTR_FORMAT_I,
                           WST_VM_OPND_IMM,

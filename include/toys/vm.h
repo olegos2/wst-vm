@@ -127,13 +127,40 @@ typedef enum {
  */
 typedef enum {
     WST_VM_INSTR_FORMAT_INVALID = 0,
-    WST_VM_INSTR_FORMAT_R,  /* opcode, rd, rs1, rs2 */
-    WST_VM_INSTR_FORMAT_I,  /* opcode, rd, rs1, 19-bit signed imm */
-    WST_VM_INSTR_FORMAT_S,  /* opcode, rs1, rs2, 19-bit signed imm */
-    WST_VM_INSTR_FORMAT_B,  /* same shape as S, imm is PC-relative */
-    WST_VM_INSTR_FORMAT_U,  /* opcode, rd, 20-bit imm shifted by 12 */
-    WST_VM_INSTR_FORMAT_J,  /* opcode, rd, 22-bit signed PC-relative imm */
+    WST_VM_INSTR_FORMAT_R,  /* rd, rs1, rs2 */
+    WST_VM_INSTR_FORMAT_I,  /* rd, rs1, imm */
+    WST_VM_INSTR_FORMAT_S,  /* rs1, rs2, imm */
+    WST_VM_INSTR_FORMAT_B,  /* like S, imm counts from pc */
+    WST_VM_INSTR_FORMAT_U,  /* rd, imm scaled to the high bits */
+    WST_VM_INSTR_FORMAT_J,  /* rd, imm counts from pc */
+    WST_VM_INSTR_FORMAT_COUNT,
 } WstVmInstrFormat;
+
+/**
+ * Field layout of one instruction format.
+ *
+ * A zero shift means the format lacks the field, the opcode owns
+ * bits 6:0. Immediate fields sit in the high bits and signed ones
+ * sign-extend back from `imm_bits`.
+ */
+typedef struct {
+    /** Bit shifts of the register fields. */
+    uint8_t rd_shift;
+    uint8_t rs1_shift;
+    uint8_t rs2_shift;
+    /** Bit shift and width of the immediate field. */
+    uint8_t imm_shift;
+    uint8_t imm_bits;
+    /** Immediate is signed, unsigned ones store `imm >> imm_shift`. */
+    bool imm_signed;
+    /** Immediate counts from the instruction address, not zero. */
+    bool pc_relative;
+} WstVmInstrFormatDesc;
+
+/**
+ * Format table, indexed by `WstVmInstrFormat`.
+ */
+extern const WstVmInstrFormatDesc wst_vm_format_table[WST_VM_INSTR_FORMAT_COUNT];
 
 /**
  * Operand slots an instruction uses, as a bitmask.

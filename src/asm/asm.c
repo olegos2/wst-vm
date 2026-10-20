@@ -174,8 +174,7 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
     uint32_t word = wst_vec_u32_get(&ctx->obj->code, fix->off / 4);
 
     int64_t imm = 0;
-    if (fix->fmt == WST_VM_INSTR_FORMAT_B ||
-        fix->fmt == WST_VM_INSTR_FORMAT_J) {
+    if (wst_vm_format_table[fix->fmt].pc_relative) {
         imm = (int64_t)target - (int64_t)fix->off;
     } else {
         /* Memory immediates count in access-size units. */
@@ -192,22 +191,7 @@ static bool asm_patch_word(AsmCtx *ctx, const AsmFixup *fix, size_t target)
     if (!asm_check_imm(fix->fmt, imm, fix->lineno))
         return false;
 
-    switch (fix->fmt) {
-    case WST_VM_INSTR_FORMAT_I:
-    case WST_VM_INSTR_FORMAT_S:
-    case WST_VM_INSTR_FORMAT_B:
-        word = asm_set_imm19(word, imm);
-        break;
-    case WST_VM_INSTR_FORMAT_J:
-        word = asm_set_imm22(word, imm);
-        break;
-    case WST_VM_INSTR_FORMAT_U:
-        word = asm_set_imm20(word, imm);
-        break;
-    default:
-        LOG_E("line %zu: bad fixup format", fix->lineno);
-        return false;
-    }
+    word = asm_set_imm(word, fix->fmt, imm);
 
     if (wst_vec_u32_set(&ctx->obj->code, fix->off / 4, word) != WST_VEC_NO_ERR) {
         LOG_E("line %zu: address space damaged", fix->lineno);
